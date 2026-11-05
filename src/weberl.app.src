@@ -1,0 +1,12 @@
+{application, weberl, [
+    {description, "Routing, handlers and templates"},
+    {vsn, "0.1.0"},
+    {registered, [weberl_sup, weberl_live_sup]},
+    {mod, {weberl_app, []}},
+    %% roadrunner is only needed by the weberl_roadrunner adapter. It is
+    %% listed so that, when present, it starts first; weberl starts without it.
+    {applications, [kernel, stdlib, crypto, roadrunner]},
+    {optional_applications, [roadrunner]},
+    {env, []},
+    {modules, []}
+]}.

@@ -1,0 +1,215 @@
+%% @doc Template engine entry point.
+%%
+%% A view module `home_view' may have a template `home_view.weberl' in the same
+%% directory as `home_view.erl'. Templates are compiled once into a generated
+%% module (`home_view__weberl_template', see `weberl_template_compiler') and
+%% rendered from there; rendering never touches the file or the parser again.
+%%
+%% ```
+%% handle(_Req) ->
+%%     weberl_response:html(200, weberl_template:render(?MODULE, #{title => <<"Hi">>})).
+%% '''
+%%
+%% == Syntax ==
+%% `{{ name }}' inserts an HTML-escaped value, `{{{ name }}}' inserts it
+%% unescaped (unsafe for untrusted input). Everything else is literal. `\{{'
+%% writes a literal `{{'. Names are `[a-z][a-zA-Z0-9_]*' and are looked up as
+%% atom keys in the assigns map. Supported values: UTF-8 binaries, character
+%% lists, integers, floats, booleans (`true'/`false').
+%%
+%% Interpolation is allowed in HTML text and in quoted attribute values only
+%% (see `weberl_template_html'); other places are rejected at compile time.
+%%
+%% == Regions ==
+%% `{: region cart :} ... {: /region cart :}' marks a part of the page the server
+%% can re-render alone (see {@link render_region/3}). It is written as the web
+%% component `<weberl-region name="cart">' around the content, or, with
+%% `{: region rows tag=tbody :}', as that element with
+%% `data-weberl-region="rows"' (a custom element is not valid inside tables,
+%% lists or selects). A region starts and ends in HTML text, may nest, and its
+%% name is used once per template. `\{:' writes a literal `{:'.
+%%
+%% == Lifecycle ==
+%% Templates are compiled and loaded when a router starts (see `weberl_views'),
+%% or explicitly with {@link compile_and_load_file/2}. Loaded code stays until
+%% the same view is compiled again (that replaces it); there is no file
+%% watching. To pick up an edited template, restart the router.
+%%
+%% == Errors ==
+%% Compilation returns `{error, Reason}': `{syntax_error, File, Line, Reason}',
+%% `{invalid_utf8, File}', `{read_failed, File, Posix}' or
+%% `{compile_failed, Errors}'. {@link render/2} raises
+%% `error({template_error, Reason})' (`{no_template, View}',
+%% `{invalid_assigns, View, Assigns}', `{missing_variable, View, Name}',
+%% `{unsupported_value, View, Name, Value}'); {@link try_render/2} returns
+%% `{error, Reason}' instead.
+-module(weberl_template).
+
+-export([render/2, try_render/2, render_region/3, try_render_region/3, regions/1,
+         has_template/1, generated_module/1,
+         compile_source/3, compile_file/2, load/1, compile_and_load_file/2,
+         discover/1, associate/2]).
+-export_type([compiled/0]).
+
+-opaque compiled() :: {module(), binary(), file:filename_all()}.
+
+%% ---------------------------------------------------------------------------
+%% Rendering
+
+-spec render(module(), map()) -> iodata().
+render(View, Assigns) when is_atom(View), is_map(Assigns) ->
+    Mod = generated_module(View),
+    case code:ensure_loaded(Mod) of
+        {module, Mod} -> Mod:render(Assigns);
+        {error, _} -> erlang:error({template_error, {no_template, View}})
+    end;
+render(View, Assigns) ->
+    erlang:error({template_error, {invalid_assigns, View, Assigns}}).
+
+-spec try_render(module(), map()) -> {ok, iodata()} | {error, term()}.
+try_render(View, Assigns) ->
+    try
+        {ok, render(View, Assigns)}
+    catch
+        error:{template_error, Reason} -> {error, Reason}
+    end.
+
+%% @doc Render the content of one region (what the browser puts inside the
+%% region's wrapper element) with the given assigns, which only need the
+%% variables that region uses. Raises `error({template_error, Reason})' like
+%% {@link render/2}, with `{unknown_region, View, Region}' for a region the
+%% template does not have.
+-spec render_region(module(), atom(), map()) -> iodata().
+render_region(View, Region, Assigns) when is_atom(View), is_atom(Region), is_map(Assigns) ->
+    Mod = generated_module(View),
+    case code:ensure_loaded(Mod) of
+        {module, Mod} -> Mod:render_region(Region, Assigns);
+        {error, _} -> erlang:error({template_error, {no_template, View}})
+    end;
+render_region(View, _Region, Assigns) ->
+    erlang:error({template_error, {invalid_assigns, View, Assigns}}).
+
+-spec try_render_region(module(), atom(), map()) -> {ok, iodata()} | {error, term()}.
+try_render_region(View, Region, Assigns) ->
+    try
+        {ok, render_region(View, Region, Assigns)}
+    catch
+        error:{template_error, Reason} -> {error, Reason}
+    end.
+
+%% @doc The regions of a view's template with their variables
+%% (`Name => #{tag, line, variables}').
+-spec regions(module()) -> {ok, map()} | {error, {no_template, module()}}.
+regions(View) ->
+    Mod = generated_module(View),
+    case code:ensure_loaded(Mod) of
+        {module, Mod} -> {ok, maps:get(regions, Mod:info())};
+        {error, _} -> {error, {no_template, View}}
+    end.
+
+%% @doc Is a compiled template loaded (or loadable) for this view?
+-spec has_template(module()) -> boolean().
+has_template(View) ->
+    case code:ensure_loaded(generated_module(View)) of
+        {module, _} -> true;
+        {error, _} -> false
+    end.
+
+-spec generated_module(module()) -> module().
+generated_module(View) -> weberl_template_compiler:generated_module(View).
+
+%% ---------------------------------------------------------------------------
+%% Compilation
+
+%% @doc Lex, parse, validate and compile template source. `File' is only used
+%% in error messages and stack traces. Nothing is loaded.
+-spec compile_source(module(), binary(), file:filename_all()) ->
+    {ok, compiled()} | {error, term()}.
+compile_source(View, Source, File) ->
+    case unicode:characters_to_binary(Source, utf8, utf8) of
+        Source ->
+            compile_utf8(View, Source, File);
+        _ ->
+            {error, {invalid_utf8, File}}
+    end.
+
+compile_utf8(View, Source, File) ->
+    case weberl_template_lexer:tokenize(Source, File) of
+        {ok, Tokens} ->
+            case weberl_template_parser:parse(Tokens, File) of
+                {ok, Ast} -> validate_and_compile(View, Ast, File);
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+validate_and_compile(View, Ast, File) ->
+    case weberl_template_parser:validate(Ast, File) of
+        ok ->
+            case weberl_template_compiler:compile(View, Ast, File) of
+                {ok, Mod, Bin} -> {ok, {Mod, Bin, File}};
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec compile_file(module(), file:filename_all()) -> {ok, compiled()} | {error, term()}.
+compile_file(View, File) ->
+    case file:read_file(File) of
+        {ok, Source} -> compile_source(View, Source, File);
+        {error, Posix} -> {error, {read_failed, File, Posix}}
+    end.
+
+%% @doc Load compiled templates, replacing any previous version.
+-spec load(compiled()) -> ok.
+load({Mod, Bin, File}) ->
+    _ = code:purge(Mod),
+    {module, Mod} = code:load_binary(Mod, unicode:characters_to_list(File), Bin),
+    ok.
+
+-spec compile_and_load_file(module(), file:filename_all()) -> ok | {error, term()}.
+compile_and_load_file(View, File) ->
+    case compile_file(View, File) of
+        {ok, Compiled} -> load(Compiled);
+        {error, _} = Error -> Error
+    end.
+
+%% ---------------------------------------------------------------------------
+%% Discovery and association
+
+%% @doc All `*.weberl' files below `Root', sorted. Pure file system scan.
+-spec discover(file:filename()) -> [file:filename()].
+discover(Root) ->
+    lists:sort(filelib:fold_files(Root, "^.+\\.weberl$", true, fun(F, Acc) -> [F | Acc] end, [])).
+
+%% @doc Pair templates with views. A template `Dir/name.weberl' belongs to the
+%% view whose source file is `Dir/name.erl'. `ViewSources' is
+%% `[{ViewModule, SourceFile}]'. Templates with no such view are an error
+%% (`{unassociated_templates, Files}'), as are two templates for one view
+%% (`{duplicate_template_associations, [{View, Files}]}'). Views without a
+%% template are fine and simply do not appear in the result.
+-spec associate([file:filename()], [{module(), file:filename()}]) ->
+    {ok, [{module(), file:filename()}]} | {error, term()}.
+associate(Templates, ViewSources) ->
+    BySource = maps:from_list([{norm(Src), Mod} || {Mod, Src} <- ViewSources]),
+    Pairs = [{maps:find(norm(filename:rootname(T, ".weberl") ++ ".erl"), BySource), T}
+             || T <- Templates],
+    case [T || {error, T} <- Pairs] of
+        [] ->
+            Assoc = [{Mod, T} || {{ok, Mod}, T} <- Pairs],
+            case duplicates(Assoc) of
+                [] -> {ok, lists:sort(Assoc)};
+                Dups -> {error, {duplicate_template_associations, Dups}}
+            end;
+        Missing ->
+            {error, {unassociated_templates, lists:sort(Missing)}}
+    end.
+
+duplicates(Assoc) ->
+    Groups = lists:foldl(fun({M, T}, Acc) -> maps:update_with(M, fun(L) -> [T | L] end, [T], Acc) end,
+                         #{}, Assoc),
+    [{M, lists:sort(Ts)} || {M, Ts} <- lists:sort(maps:to_list(Groups)), length(Ts) > 1].
+
+norm(Path) -> filename:join(filename:split(Path)).

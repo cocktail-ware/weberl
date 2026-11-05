@@ -1,0 +1,150 @@
+_build/
+rebar3.crashdump
+erl_crash.dump
+*.beam
+
+/################################
+/################################
+/################################
+/################################
+## TERRAFORM
+/################################
+
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Exclude all .tfvars files, which are likely to contain sensitive data, such as
+# password, private keys, and other secrets. These should not be part of version 
+# control as they are data points which are potentially sensitive and subject 
+# to change depending on the environment.
+*.tfvars
+*.tfvars.json
+
+# Ignore override files as they are usually used to override resources locally and so
+# are not checked in
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ignore transient lock info files created by terraform apply
+.terraform.tfstate.lock.info
+
+# Include override files you do wish to add to version control using negated pattern
+# !example_override.tf
+
+# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
+# example: *tfplan*
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+/################################
+/################################
+/################################
+/################################
+## ELIXIR
+/################################
+
+# The directory Mix will write compiled artifacts to.
+/_build/
+/_build_*/
+
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+/deps_*/
+
+# Where third-party dependencies like ExDoc output generated docs.
+/doc/
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Temporary files, for example, from tests.
+/tmp/
+
+/dialyzer_plts/
+
+*.env
+*.*-env
+*.*-env-*
+.env*
+
+/apps/server/assets/css/*.css
+/apps/server/screenshots/
+/screenshots
+/**/*/screenshots
+
+*.secret.exs
+*.secret.ex
+
+# Ignore package tarball (built via "mix hex.build").
+ex_base-*.tar
+
+# Ignore assets that are produced by build tools.
+/priv/static/assets/
+
+# Ignore digested assets cache.
+/priv/static/cache_manifest.json
+
+# In case you use Node.js/npm, you want to ignore these.
+npm-debug.log
+/assets/node_modules/
+
+k
+
+*.pem
+
+### EMACS
+
+*~
+\#*\#
+.\#*
+
+
+###### packer
+
+# Cache objects
+packer_cache/
+
+# Crash log
+crash.log
+
+# https://www.packer.io/guides/hcl/variables
+# Exclude all .pkrvars.hcl files, which are likely to contain sensitive data, 
+# such as password, private keys, and other secrets. These should not be part of 
+# version control as they are data points which are potentially sensitive and 
+# subject to change depending on the environment.
+#
+*.pkrvars.hcl
+
+# For built boxes
+*.box
+
+# any keys folder that stores keys locally when creating infra
+**/keys/*
+
+.TODO*
+
+/lib/ignore/
+# Node / browser tests
+/test/node/node_modules/
+/test/node/_priv/
+/test/node/certs/
+/test/node/test-results/
+/test/node/playwright-report/

@@ -1,0 +1,9 @@
+{application, example, [
+    {description, "Weberl example application"},
+    {vsn, "0.1.0"},
+    {registered, [example_sup]},
+    {mod, {example_app, []}},
+    %% weberl must start before example (it loads the config records).
+    {applications, [kernel, stdlib, weberl, roadrunner]},
+    {env, [{port, 8080}]}
+]}.

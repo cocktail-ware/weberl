@@ -1,0 +1,7 @@
+{application, demo_app, [
+    {description, "Fixture application consuming weberl"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [kernel, stdlib]},
+    {modules, []}
+]}.

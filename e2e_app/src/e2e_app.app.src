@@ -1,0 +1,7 @@
+{application, e2e_app, [
+    {description, "App under test of the Weberl browser tests"},
+    {vsn, "0.1.0"},
+    {registered, [e2e_app_sup]},
+    {mod, {e2e_app_app, []}},
+    {applications, [kernel, stdlib, weberl, roadrunner]}
+]}.
