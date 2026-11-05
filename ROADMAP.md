@@ -12,6 +12,19 @@ specification; kept here so they don't clutter active work.
   cases where a lenient return is easier (for example, a bare iodata body, or
   `{Status, Body}`), without removing the strict default.
 
+## Forms
+- `weberl_form` is deliberately minimal (`open/2,3`, `csrf_input/1`). A real forms layer needs its own
+  design: deriving input names (and ids/labels) from a schema or from the view's assigns; a live and a
+  plain version of the same form according to the page kind (what a form is on a `normal`, `one_way` and
+  `two_way` page); reactive bindings on two-way pages (an input bound to a view assign, validation on
+  the way); what a form does on a one-way page (no way back except HTTP requests); error and value
+  re-display after a failed submit; CSRF on live requests (they have page tokens today, see README
+  "Credentials"). Also wanted: `weberl_request:multipart/1` through the adapter callback pattern (parts
+  `#{name, filename, content_type, body}`); today `form/1` refuses `multipart/form-data` and Roadrunner
+  buffers the whole body.
+- Once templates have conditionals and URL-safe interpolation (feedback items 2 and 3), a plain
+  `<form>` with `{{ csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
+
 ## Request
 - `weberl_request:path/1` is the raw requested path (not percent-decoded, not
   normalized). Keep it for inspection, and add a second, converted/decoded

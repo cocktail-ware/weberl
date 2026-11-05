@@ -4,6 +4,8 @@
 %% `weberl_response'. Never raises:
 %% <ul>
 %%   <li>unmatched route: 404 `Not Found' (text/plain);</li>
+%%   <li>an unsafe method (`POST', `PUT', `PATCH', `DELETE') that fails the route's
+%%       CSRF check (`weberl_csrf'): 403 `Forbidden', the handler is not called;</li>
 %%   <li>`one_way' / `two_way' routes: the handler's topics are resolved
 %%       (`weberl_live:topics/2'; invalid ones are a 500), a live session is
 %%       opened (unless the route says `session => false', then the page id is
@@ -24,8 +26,19 @@
 -spec dispatch(weberl_request:t(), weberl_table:t()) -> weberl_response:t().
 dispatch(Request, Table) ->
     case weberl_table:lookup(weberl_request:path(Request), Table) of
-        {ok, Route} -> serve(weberl_route:live(Route), Route, Request);
-        {error, not_found} -> weberl_response:text(404, <<"Not Found">>)
+        {ok, Route} ->
+            case weberl_csrf:check(weberl_route:csrf(Route), Request) of
+                ok ->
+                    serve(weberl_route:live(Route), Route, Request);
+                {error, Reason} ->
+                    ?LOG_WARNING(#{what => csrf_rejected, reason => Reason,
+                                   method => weberl_request:method(Request),
+                                   path => weberl_request:path(Request),
+                                   handler => weberl_route:handler(Route)}),
+                    weberl_response:text(403, <<"Forbidden">>)
+            end;
+        {error, not_found} ->
+            weberl_response:text(404, <<"Not Found">>)
     end.
 
 serve(normal, Route, Request) ->

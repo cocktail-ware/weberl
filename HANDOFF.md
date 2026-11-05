@@ -81,9 +81,19 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `test/weberl_response_helpers_tests.erl` (includes a 303 with two set-cookie over Roadrunner).
   **Multipart**: not supported by `form/1` yet; proposed `weberl_request:multipart/1` through the same
   adapter callback pattern (parts `#{name, filename, content_type, body}`), user has not decided.
-  **Still to do in 1**: CSRF (framework-provided; Arizona uses an Origin check, no token; proposal:
-  Origin check by default as a router-level step, plus an optional double-submit token and a basic
-  form helper), then reply in agentic's `WEBERL_FEEDBACK.md`.
+**1c done: CSRF** (user decided: strict by default, option A; token and
+  form helper in this step; forms are a future roadmap item, in `ROADMAP.md` "Forms"). Route option
+  `csrf => true | origin | false` (default `true`); `weberl_dispatch` runs `weberl_csrf:check/2` for
+  POST/PUT/PATCH/DELETE (403 + `csrf_rejected` log); Origin check (authority = Host, https listener
+  refuses http origin, `csrf_origins` env, `null` refused, missing passes) + signed double-submit token
+  (`weberl_csrf:protect/2`, `verify/1`, cookie `weberl_csrf` / `__Host-weberl_csrf` with `csrf_secure`,
+  field `_csrf`, header `x-csrf-token`); `weberl_form:open/2,3`, `csrf_input/1`; the signing key moved to
+  `weberl_sign` (shared with `weberl_live_guard`; flash can reuse it). Tests: `weberl_csrf_tests`
+  (688 eunit tests pass). **Breaking**: POST routes now need a token or `csrf => false`/`origin`
+  (two existing tests were switched to `csrf => false`). **Still to do**: reply in agentic's
+  `WEBERL_FEEDBACK.md` (and note that its `agentic_web.erl` can drop cookie parsing, form parsing,
+  Set-Cookie building, redirects and CSRF), then item 6 (flash/session on top of `weberl_sign` and
+  `set_cookie`), then 5, 2, 3.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

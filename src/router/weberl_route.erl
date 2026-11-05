@@ -4,7 +4,7 @@
 %% filesystem and declarative routes.
 -module(weberl_route).
 
--export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1,
+-export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1, csrf/1,
          normalize_path/1, check_opts/1, check_live/1]).
 -export_type([t/0, origin/0, path/0, live/0, opts/0]).
 -export_record([route]).
@@ -17,7 +17,7 @@
 %% `live': the page kind. `session': `false' makes a live page session-less
 %% (no process per page; it only receives the topics of its handler, see
 %% `weberl_live'); default `true'.
--type opts() :: #{live => live(), session => boolean()}.
+-type opts() :: #{live => live(), session => boolean(), csrf => true | origin | false}.
 
 -record #route{
     path    :: path(),
@@ -66,16 +66,22 @@ live(#route{opts = O}) -> maps:get(live, O, normal).
 -spec session(t()) -> boolean().
 session(#route{opts = O}) -> maps:get(session, O, true).
 
-%% @doc Validate a route options map. The keys are `live' and `session'; a
+%% @doc The CSRF mode of the route, `true' unless declared otherwise (see
+%% {@link weberl_csrf}).
+-spec csrf(t()) -> weberl_csrf:mode().
+csrf(#route{opts = O}) -> maps:get(csrf, O, true).
+
+%% @doc Validate a route options map. The keys are `live', `session' and `csrf'; a
 %% session-less page has to be live.
 -spec check_opts(term()) -> {ok, opts()} | {error, term()}.
 check_opts(Opts) when is_map(Opts) ->
-    case [K || K <- maps:keys(Opts), K =/= live, K =/= session] of
+    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf] of
         [] ->
-            case {check_kind(Opts), check_session(Opts)} of
-                {ok, ok} -> {ok, Opts};
-                {{error, _} = Error, _} -> Error;
-                {ok, {error, _} = Error} -> Error
+            case {check_kind(Opts), check_session(Opts), check_csrf(Opts)} of
+                {ok, ok, ok} -> {ok, Opts};
+                {{error, _} = Error, _, _} -> Error;
+                {ok, {error, _} = Error, _} -> Error;
+                {ok, ok, {error, _} = Error} -> Error
             end;
         Unknown ->
             {error, {unknown_options, lists:sort(Unknown)}}
@@ -87,6 +93,13 @@ check_kind(Opts) ->
     case maps:find(live, Opts) of
         error -> ok;
         {ok, Kind} -> check_live(Kind)
+    end.
+
+check_csrf(Opts) ->
+    case maps:find(csrf, Opts) of
+        error -> ok;
+        {ok, Mode} when Mode =:= true; Mode =:= origin; Mode =:= false -> ok;
+        {ok, Other} -> {error, {invalid_csrf, Other}}
     end.
 
 check_session(Opts) ->

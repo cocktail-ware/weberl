@@ -43,15 +43,13 @@
 
 -define(SALT_BYTES, 8).
 -define(MAC_BYTES, 32).
--define(KEY, {weberl_live_guard, secret}).
 -define(LABEL, <<"weberl-page">>).
 
 %% @doc Make sure the secret exists. Called at application start; the other
 %% functions also create it on first use.
 -spec init() -> ok.
 init() ->
-    _ = secret(),
-    ok.
+    weberl_sign:init().
 
 %% @doc The token for a page, valid for the given channels only.
 -spec issue(weberl_live:page_id(), [channel()]) -> binary().
@@ -158,20 +156,7 @@ bit(ws) -> 2;
 bit(poll) -> 4;
 bit(request) -> 8.
 
-secret() ->
-    case application:get_env(weberl, live_secret) of
-        {ok, Secret} when is_binary(Secret), byte_size(Secret) >= 16 ->
-            Secret;
-        _ ->
-            case persistent_term:get(?KEY, undefined) of
-                undefined ->
-                    Secret = crypto:strong_rand_bytes(32),
-                    ok = persistent_term:put(?KEY, Secret),
-                    Secret;
-                Secret ->
-                    Secret
-            end
-    end.
+secret() -> weberl_sign:secret().
 
 encode(Bin) -> base64:encode(Bin, #{mode => urlsafe, padding => false}).
 

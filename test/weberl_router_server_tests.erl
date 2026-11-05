@@ -166,9 +166,9 @@ request_conversion() ->
             weberl_response:text(200, Out).
         """),
     Name = router_name(),
-    {ok, _} = weberl:start_link(Name, decl_router([{"/echo", Echo}]), listener()),
+    {ok, _} = weberl:start_link(Name, decl_router([{"/echo", Echo, #{csrf => false}}]), listener()),
     try
-        {200, _, Out} = request(post, Name, "/echo?a=1&b=x%20y", [{"X-Test", "val"}], <<"payload">>),
+        {200, _, Out} = request(post,Name, "/echo?a=1&b=x%20y", [{"X-Test", "val"}], <<"payload">>),
         ?assertEqual(<<"POST|/echo|[{<<\"a\">>,<<\"1\">>},{<<\"b\">>,<<\"x y\">>}]|val|payload|"
                        "{127,0,0,1}|weberl_roadrunner|#{}">>, Out),
         {200, _, Out2} = request(get, Name, "/echo", [{"x-test", "v2"}], <<>>),

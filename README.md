@@ -194,6 +194,8 @@ setting you should treat as required in production is `live_secret`.
 | Key | Default | What it does |
 |---|---|---|
 | `live_secret` | random per node start | Key that signs page tokens (binary, at least 16 bytes; shorter values are ignored). **Set it in production**: with the default, every restart invalidates the tokens of pages already open (their beacons get 403 and give up), and nodes behind a load balancer reject each other's tokens. Keep it out of version control: read it from the environment at startup, e.g. `application:set_env(weberl, live_secret, list_to_binary(os:getenv("WEBERL_SECRET")))` before the first page is served. Rotating it invalidates open pages. |
+| `csrf_origins` | `[]` | extra trusted origins for the [CSRF](#csrf-protection) Origin check (binaries such as `<<"https://app.example">>`). |
+| `csrf_secure` | `false` | `true` makes the CSRF cookie `Secure` and `__Host-`-prefixed. **Set it in production** (HTTPS); a `Secure` cookie is dropped over plain HTTP, which breaks local development. |
 | `live_subscribe_timeout` | `10000` | ms a freshly opened WebSocket may wait to subscribe its first page before it is closed. |
 | `live_attach_timeout` | `30000` | ms a rendered page may wait for its first connection before the session ends. |
 | `live_idle_timeout` | `60000` | ms a session waits for a reconnect after its transport dropped. |
@@ -453,11 +455,58 @@ Header names and values with control characters raise `badarg` everywhere (`new/
 with `weberl_url:local/1` first (true only for a path on this site: one leading `/`, not `//` or `/\`, no
 control characters) and fall back to a fixed page.
 
+### CSRF protection
+
+Every route is protected against cross-site request forgery by default. For the unsafe methods
+(`POST`, `PUT`, `PATCH`, `DELETE`; `GET`, `HEAD` and `OPTIONS` are never checked, so a handler must not
+change state on them) dispatch checks, before the handler runs, the **Origin** and a **token**; a failure
+is a logged `403 Forbidden`. A route chooses its mode with a route option (`{Path, Handler, #{csrf =>
+Mode}}` or `-weberl_route(#{csrf => Mode}).`):
+
+| `csrf` | Checks |
+|---|---|
+| `true` (default) | Origin and token |
+| `origin` | Origin only: JSON APIs, webhooks, clients that cannot carry a token |
+| `false` | nothing; say so on purpose |
+
+*Origin*: a request with an `Origin` header must come from this site (its authority equals `Host`, and on
+an HTTPS listener it is HTTPS too) or be listed in the `csrf_origins` env (`[<<"https://app.example">>]`,
+for a proxy that rewrites `Host`). `Origin: null` is refused; no `Origin` passes (the token covers it).
+
+*Token* (signed double submit): a cookie holds a random nonce and its HMAC (key: `live_secret`), and the
+request must send the same value in the `_csrf` field of an urlencoded form or in the `x-csrf-token`
+header. The page that shows the form gets its token, and the cookie, from `weberl_csrf:protect/2`:
+
+```erlang
+handle(Request) ->
+    weberl_csrf:protect(Request, fun(Token) ->
+        Html = weberl_template:render(?MODULE, #{form => weberl_form:open(Token, "/login")}),
+        weberl_response:html(200, Html)
+    end).
+```
+
+`protect/2` sets the cookie only when the browser has none, and adds `cache-control: private, no-store`
+(the page carries a per-browser token) unless the handler set one. In the template, `{{{ form }}}`
+inserts the helper's HTML. `weberl_form:open(Token, Action[, Opts])` returns `<form method="post"
+action="...">` plus the hidden `_csrf` input; `#{csrf => false}` leaves the input out (and needs no
+token), `method => get` never carries one, `enctype` and `attrs` add attributes (escaped), and an
+`Action` that is not a path on this site or an `http(s)` URL raises. `weberl_form:csrf_input/1` is just
+the input. Scripts read the token from the form field or from the page and send `x-csrf-token`.
+
+Set `{csrf_secure, true}` in production (HTTPS): the cookie is then `Secure` and named
+`__Host-weberl_csrf`, which browsers refuse to let a sibling subdomain overwrite. Without it a cookie
+planted by a sibling subdomain is still rejected because it lacks our MAC, but the attacker can pair
+their own valid cookie and field.
+
+Not covered: forms are one helper for now (see "Forms" in `ROADMAP.md`); the live endpoints under
+`/_weberl/` have their own page tokens and Origin check (see [Credentials](#credentials)).
+
 ### Dispatch, errors and metadata
 
 `weberl_dispatch:dispatch(Request, Table)` returns a response and never raises:
 
 - no matching route: `404` `Not Found` (text/plain);
+- an unsafe method failing the route's [CSRF check](#csrf-protection): `403` `Forbidden`;
 - the handler raises, throws, exits, or returns anything but a `weberl_response`:
   `500` `Internal Server Error`. The client sees no details; the cause is logged
   at error level with handler, method, path, class, reason and stacktrace.
@@ -675,8 +724,10 @@ Erlang modules.
 ## Transport adapters and Roadrunner
 
 The listener's `adapter` names a module implementing `weberl_adapter`
-(`validate_options/1`, `start_listener/3`, `stop_listener/1`, `port/1`). Everything
-above the adapter is transport independent.
+(`validate_options/1`, `start_listener/3`, `stop_listener/1`, `port/1`, and `cookies/1` and
+`form/1`, which parse a request's cookies and urlencoded form for `weberl_request:cookies/1` and
+`form/1`; optionally `validate_static/1`). Everything above the adapter is transport independent: an
+adapter only has to send repeated response headers (several `set-cookie`) as separate headers.
 
 `weberl_roadrunner` is included in weberl but optional. weberl compiles and starts
 without Roadrunner (it is in `optional_applications`); the adapter then reports

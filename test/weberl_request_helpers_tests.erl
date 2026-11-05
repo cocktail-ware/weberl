@@ -58,7 +58,9 @@ start_app() ->
         """),
     Name = weberl_test_handlers:unique("helpers"),
     M = weberl_test_handlers:unique("helpers_router"),
-    load_router(M, [{"/cookies", Cookies}, {"/form", Form}, {"/login", Login}]),
+    %% These routes test parsing, not CSRF (see weberl_csrf_tests).
+    NoCsrf = #{csrf => false},
+    load_router(M, [{"/cookies", Cookies}, {"/form", Form, NoCsrf}, {"/login", Login, NoCsrf}]),
     {ok, _} = weberl:start_link(Name, #router{modules = [M]},
                                 #listener{port = 0, ip = {127, 0, 0, 1},
                                           options = #{max_content_length => 200}}),
