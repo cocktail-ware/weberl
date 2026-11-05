@@ -14,10 +14,9 @@ handle(Request) ->
                {_, Handler} when is_binary(Handler) -> Stats#{sessions_of => sessions_of(Handler)};
                _ -> Stats
            end,
-    weberl_response:with_header(
-      <<"content-type">>, <<"application/json">>,
-      weberl_response:with_header(<<"cache-control">>, <<"no-store">>,
-                                  weberl_response:text(200, json:encode(Body)))).
+    R0 = weberl_response:text(200, json:encode(Body)),
+    R1 = weberl_response:with_header(R0, <<"cache-control">>, <<"no-store">>),
+    weberl_response:with_header(R1, <<"content-type">>, <<"application/json">>).
 
 sessions_of(Handler) ->
     length([Id || {page, Id} <- pg:which_groups(weberl_live),

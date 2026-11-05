@@ -167,7 +167,7 @@ downgrade_to_normal() ->
          ?assertEqual(200, weberl_response:status(R)),
          ?assertEqual(<<"<body>x</body>">>, body(R)),
          %% no beacon, kept out of shared caches, and the session is gone
-         ?assertEqual({ok, <<"private, no-store">>}, weberl_response:header(<<"cache-control">>, R)),
+         ?assertEqual({ok, <<"private, no-store">>}, weberl_response:header(R, <<"cache-control">>)),
          await_no_sessions(Owner)
      end || RouteKind <- [one_way, two_way]].
 
@@ -193,12 +193,13 @@ marker_on_normal_route() ->
 cache_control_default() ->
     {_, R} = serve(load("cd", "handle(_) -> weberl_response:html(200, <<\"<body>x</body>\">>)."),
                    one_way),
-    ?assertEqual({ok, <<"private, no-store">>}, weberl_response:header(<<"cache-control">>, R)).
+    ?assertEqual({ok, <<"private, no-store">>}, weberl_response:header(R, <<"cache-control">>)).
 
 cache_control_handler() ->
     Handler = fun(Value) ->
-                      load("cc", "handle(_) -> weberl_response:with_header(<<\"cache-control\">>, <<\""
-                                 ++ Value ++ "\">>, weberl_response:html(200, <<\"<body>x</body>\">>)).")
+                      load("cc", "handle(_) -> weberl_response:with_header("
+                                 "weberl_response:html(200, <<\"<body>x</body>\">>), "
+                                 "<<\"cache-control\">>, <<\"" ++ Value ++ "\">>).")
               end,
     Warned = fun(Value) ->
                      Self = self(),
@@ -212,7 +213,7 @@ cache_control_handler() ->
                          {_, R} = serve(Handler(Value), one_way),
                          %% what the handler set stays as it is
                          ?assertEqual({ok, list_to_binary(Value)},
-                                      weberl_response:header(<<"cache-control">>, R)),
+                                      weberl_response:header(R, <<"cache-control">>)),
                          receive
                              {log, #{msg := {report, #{what := live_page_allows_shared_caching}}}} -> true
                          after 200 -> false

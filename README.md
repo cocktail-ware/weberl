@@ -410,11 +410,16 @@ weberl_response:html(200, Body)        % text/html; charset=utf-8
 weberl_response:text(200, Body)        % text/plain; charset=utf-8
 weberl_response:binary(200, Body)      % application/octet-stream
 weberl_response:new(204, [{"cache-control", "no-store"}], <<>>)
-weberl_response:with_header("x-custom", "yes", Response)   % replaces, case-insensitive
+weberl_response:with_header(Response, "x-custom", "yes")   % replaces, case-insensitive
+weberl_response:header(Response, "x-custom")               % {ok, Value} | error
 ```
 
 Bodies are `iodata()`, status is 100..599, header names are stored lower-case.
 Invalid arguments raise `badarg`.
+
+Convention: **functions take their subject first** (the request or the response), in
+`weberl_request` and `weberl_response` alike: `weberl_request:header(Request, Name)`,
+`weberl_response:with_header(Response, Name, Value)`.
 
 ### Dispatch, errors and metadata
 

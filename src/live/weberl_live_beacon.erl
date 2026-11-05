@@ -19,9 +19,9 @@
 %% cacheable part of a page statically and mount the live parts with JS instead.
 -spec cache_control(weberl_response:t(), map()) -> weberl_response:t().
 cache_control(Response, Context) ->
-    case weberl_response:header(<<"cache-control">>, Response) of
+    case weberl_response:header(Response, <<"cache-control">>) of
         error ->
-            weberl_response:with_header(<<"cache-control">>, <<"private, no-store">>, Response);
+            weberl_response:with_header(Response, <<"cache-control">>, <<"private, no-store">>);
         {ok, Value} ->
             case shared_caching(Value) of
                 true ->
@@ -49,7 +49,7 @@ directive(D) ->
 injectable(Response) ->
     Status = weberl_response:status(Response),
     Status >= 200 andalso Status < 300 andalso
-        case weberl_response:header(<<"content-type">>, Response) of
+        case weberl_response:header(Response, <<"content-type">>) of
             {ok, Type} -> is_html(Type);
             error -> false
         end.
@@ -64,7 +64,7 @@ inject(Response, {PageId, Kind}) ->
     inject(Response, {PageId, Kind, #{}});
 inject(Response, {PageId, Kind, Claims}) ->
     Body = iolist_to_binary(weberl_response:body(Response)),
-    weberl_response:with_body(insert(Body, tag(PageId, Kind, Claims)), Response).
+    weberl_response:with_body(Response, insert(Body, tag(PageId, Kind, Claims))).
 
 %% @doc The script tags: the transport engine (`priv/engine.js', no DOM, so a
 %% worker can run it too) and the beacon (`priv/client.js', which reads the data

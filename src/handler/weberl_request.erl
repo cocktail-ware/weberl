@@ -13,6 +13,9 @@
 %%   <li>`meta': free-form map for transport metadata.</li>
 %% </ul>
 %%
+%% Convention: every function takes the request first (`method(Request)',
+%% `header(Request, Name)'), so accessors compose with pipelines and helpers.
+%%
 %% The body is never read when a request is built. {@link read_body/1} calls the
 %% reader the adapter supplied (`body_reader'); whether a second call works is
 %% transport dependent.
@@ -66,8 +69,8 @@ path(#request{path = P}) -> P.
 headers(#request{headers = H}) -> H.
 
 %% @doc Case-insensitive lookup of the first header with that name.
--spec header(iodata(), t()) -> {ok, binary()} | error.
-header(Name, #request{headers = H}) ->
+-spec header(t(), iodata()) -> {ok, binary()} | error.
+header(#request{headers = H}, Name) ->
     case lists:keyfind(string:lowercase(iolist_to_binary(Name)), 1, H) of
         {_, V} -> {ok, V};
         false -> error
@@ -102,8 +105,8 @@ meta(#request{meta = M}) -> M.
 -spec page(t()) -> undefined | binary().
 page(#request{page = P}) -> P.
 
--spec with_page(binary(), t()) -> t().
-with_page(PageId, #request{} = R) when is_binary(PageId) -> R#request{page = PageId}.
+-spec with_page(t(), binary()) -> t().
+with_page(#request{} = R, PageId) when is_binary(PageId) -> R#request{page = PageId}.
 
 %% @doc Read the request body through the adapter-supplied reader. A request
 %% with no reader has an empty body.

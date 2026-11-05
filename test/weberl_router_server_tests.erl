@@ -95,8 +95,8 @@ http_test_() ->
 declarative_end_to_end() ->
     Ok = handler("ok", "handle(_) -> weberl_response:html(200, <<\"<b>ok</b>\">>)."),
     Made = handler("made",
-                   "handle(_) -> weberl_response:with_header(\"x-custom\", \"yes\", "
-                   "weberl_response:text(201, <<\"created\">>))."),
+                   "handle(_) -> weberl_response:with_header("
+                   "weberl_response:text(201, <<\"created\">>), \"x-custom\", \"yes\")."),
     Boom = handler("boom", "handle(_) -> erlang:error(secret_boom)."),
     Name = router_name(),
     {ok, _} = weberl:start_link(Name, decl_router([{"/ok", Ok}, {"/made", Made},
@@ -157,7 +157,7 @@ request_conversion() ->
         handle(R) ->
             {ok, Body} = weberl_request:read_body(R),
             {ok, QP} = weberl_request:query_params(R),
-            {ok, H} = weberl_request:header(<<"x-test">>, R),
+            {ok, H} = weberl_request:header(R, <<"x-test">>),
             {IP, _Port} = weberl_request:peer(R),
             Meta = weberl_request:meta(R),
             Out = io_lib:format("~s|~s|~p|~s|~s|~w|~w|~w",
@@ -353,7 +353,7 @@ convert_request_test() ->
     ?assertEqual(<<"PUT">>, weberl_request:method(W)),
     ?assertEqual("/a/b", weberl_request:path(W)),
     ?assertEqual(<<"x=1">>, weberl_request:query(W)),
-    ?assertEqual({ok, <<"v">>}, weberl_request:header("x-k", W)),
+    ?assertEqual({ok, <<"v">>}, weberl_request:header(W, "x-k")),
     ?assertEqual({{10, 0, 0, 1}, 4444}, weberl_request:peer(W)),
     ?assertEqual(#{}, weberl_request:params(W)),
     ?assertEqual({ok, <<"hello">>}, weberl_request:read_body(W)),
@@ -366,7 +366,7 @@ convert_non_utf8_path_test() ->
     ?assertEqual([$/, 255], weberl_request:path(W)).
 
 convert_response_test() ->
-    R = weberl_response:with_header("X-A", "1", weberl_response:html(202, <<"b">>)),
+    R = weberl_response:with_header(weberl_response:html(202, <<"b">>), "X-A", "1"),
     ?assertEqual({202, [{<<"x-a">>, <<"1">>}, {<<"content-type">>, <<"text/html; charset=utf-8">>}],
                   <<"b">>},
                  weberl_roadrunner_convert:response(R)).

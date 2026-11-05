@@ -83,7 +83,7 @@ page() ->
     View = view(),
     {ok, Id} = weberl_live:open(view_owner, one_way, #{handler => View}),
     ok = weberl_live:attach(Id, self()),
-    Request = weberl_request:with_page(Id, weberl_request:new(#{method => <<"GET">>, path => "/p"})),
+    Request = weberl_request:with_page(weberl_request:new(#{method => <<"GET">>, path => "/p"}), Id),
     {View, Id, Request}.
 
 html(IoData) -> iolist_to_binary(IoData).
@@ -115,7 +115,7 @@ mount_without_session() ->
     Plain = weberl_request:new(#{method => <<"GET">>, path => "/p"}),
     ?assertMatch(<<"<h1>T</h1>", _/binary>>, html(weberl_live:mount(View, Plain, view_data()))),
     %% a page id nobody holds (a session-less page)
-    Page = weberl_request:with_page(weberl_live:new_page_id(), Plain),
+    Page = weberl_request:with_page(Plain, weberl_live:new_page_id()),
     ?assertMatch(<<"<h1>T</h1>", _/binary>>, html(weberl_live:mount(View, Page, view_data()))),
     ?assertEqual({error, not_found}, weberl_live:view(<<"nosuchpage">>)).
 
@@ -160,7 +160,7 @@ assign_errors() ->
 assign_detached() ->
     View = view(),
     {ok, Id} = weberl_live:open(view_owner, one_way, #{handler => View}),
-    Request = weberl_request:with_page(Id, weberl_request:new(#{method => <<"GET">>, path => "/p"})),
+    Request = weberl_request:with_page(weberl_request:new(#{method => <<"GET">>, path => "/p"}), Id),
     _ = weberl_live:mount(View, Request, view_data()),
     ?assertEqual(ok, weberl_live:assign(Id, #{count => 9})),
     ok = weberl_live:attach(Id, self()),

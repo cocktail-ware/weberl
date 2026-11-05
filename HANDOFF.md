@@ -59,6 +59,25 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
    next to `-weberl_page(...)`; one place would be more predictable.
 6. No flash or session helper: flash is a fixed-code query parameter mapped to messages in Erlang.
 
+### Decisions on the feedback (user, 2026-11-05)
+
+- **Order**: 4, 1, 6 (builds on 1), then 5, 2, 3 last (2 and 3 need design decisions the user
+  wants to generalise to other libraries that need template conditionals; 2 should offer
+  Erlang-like conditionals plus comprehensions/for; 5 is a discussion).
+- **4 done** (breaking change accepted): functions take the subject first. `header/2`,
+  `with_header/3`, `with_body/2`, `with_page/2` in `weberl_request` / `weberl_response`.
+- **1**: homogenised Weberl helpers that use the underlying adapter; add the needed
+  callbacks to the adapter behaviour. Basic form helpers are needed for CSRF; **CSRF is
+  provided by the framework**. Each item gets tests for the exact complaint it solves.
+- Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
+  `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
+  middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`
+  (adapter callback `parse_cookies/1`) and `put_resp_cookie/4`, serialized by an
+  adapter-independent `arizona_cookie:serialize/3` that raises on invalid name/value/attr bytes;
+  `redirect/2,3` stashes a status and location; flash is a signed, expiring, one-time cookie
+  (`arizona_flash`, HMAC with `secret_key`, purpose label); sessions are a signed cookie or a
+  server-side store behind the `arizona_session_store` behaviour. It has no form parser.
+
 ### Plan for the feedback (proposal; the user decides order and each design point)
 
 Rules as always: **one design point at a time**, record the decision here or in the README

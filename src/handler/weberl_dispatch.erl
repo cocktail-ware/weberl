@@ -49,7 +49,7 @@ live(Kind, Route, Topics, Request) ->
     Session = weberl_route:session(Route),
     case open(Session, Kind, Handler, Topics, Request) of
         {ok, PageId} ->
-            Response = invoke(Handler, weberl_request:with_page(PageId, Request)),
+            Response = invoke(Handler, weberl_request:with_page(Request, PageId)),
             case final_kind(Kind, Response, Request) of
                 {ok, Final} ->
                     finish(Final, Kind, Response, {PageId, Session, Handler, Topics}, Request);

@@ -36,11 +36,11 @@ handler_receives_request_test() ->
     ?assertEqual("/echo", binary_to_list(iolist_to_binary(weberl_response:body(R)))).
 
 custom_status_and_headers_test() ->
-    A = load("c", "handle(_) -> weberl_response:with_header(\"x-k\", \"v\", "
-                  "weberl_response:text(201, <<\"made\">>))."),
+    A = load("c", "handle(_) -> weberl_response:with_header("
+                  "weberl_response:text(201, <<\"made\">>), \"x-k\", \"v\")."),
     R = weberl_dispatch:dispatch(req("/c"), table([{"/c", A}], [])),
     ?assertEqual(201, weberl_response:status(R)),
-    ?assertEqual({ok, <<"v">>}, weberl_response:header("x-k", R)).
+    ?assertEqual({ok, <<"v">>}, weberl_response:header(R, "x-k")).
 
 not_found_test() ->
     T = table([], []),

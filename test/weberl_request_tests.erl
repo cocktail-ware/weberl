@@ -21,8 +21,18 @@ headers_lowercased_and_lookup_test() ->
     R = req(#{headers => [{<<"Content-Type">>, <<"text/plain">>}, {<<"X-A">>, <<"1">>}]}),
     ?assertEqual([{<<"content-type">>, <<"text/plain">>}, {<<"x-a">>, <<"1">>}],
                  weberl_request:headers(R)),
-    ?assertEqual({ok, <<"text/plain">>}, weberl_request:header("CONTENT-TYPE", R)),
-    ?assertEqual(error, weberl_request:header(<<"x-missing">>, R)).
+    ?assertEqual({ok, <<"text/plain">>}, weberl_request:header(R, "CONTENT-TYPE")),
+    ?assertEqual(error, weberl_request:header(R, <<"x-missing">>)).
+
+%% Feedback from agentic (item 4): `header' took the request last while `method',
+%% `query_params' and `read_body' take it first. Every request function now takes
+%% the request first, and the old order is rejected instead of silently misread.
+request_comes_first_in_every_function_test() ->
+    R = weberl_request:with_page(req(#{headers => [{<<"x-a">>, <<"1">>}]}), <<"P">>),
+    ?assertEqual({ok, <<"1">>}, weberl_request:header(R, <<"x-a">>)),
+    ?assertEqual(<<"P">>, weberl_request:page(R)),
+    ?assertError(function_clause, weberl_request:header(<<"x-a">>, R)),
+    ?assertError(function_clause, weberl_request:with_page(<<"P">>, R)).
 
 query_params_test() ->
     ?assertEqual({ok, []}, weberl_request:query_params(req(#{}))),

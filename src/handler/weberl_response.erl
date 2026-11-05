@@ -10,6 +10,10 @@
 %%   <li>{@link binary/2}: `application/octet-stream'</li>
 %% </ul>
 %% Invalid arguments raise `error:badarg'.
+%%
+%% Convention: functions that work on a response take it first
+%% (`header(Response, Name)', `with_header(Response, Name, Value)'), the same
+%% as `weberl_request'.
 -module(weberl_response).
 
 -export([new/3, html/2, text/2, binary/2,
@@ -53,13 +57,13 @@ binary(Status, Body) -> typed(Status, "application/octet-stream", Body).
 
 %% @doc Set a header, replacing any existing header of the same name
 %% (case-insensitive).
--spec with_header(iodata(), iodata(), t()) -> t().
-with_header(Name, Value, #response{headers = Hs} = R) ->
+-spec with_header(t(), iodata(), iodata()) -> t().
+with_header(#response{headers = Hs} = R, Name, Value) ->
     R#response{headers = put_header(Name, Value, Hs)}.
 
 %% @doc Replace the body, keeping status and headers.
--spec with_body(iodata(), t()) -> t().
-with_body(Body, #response{} = R) ->
+-spec with_body(t(), iodata()) -> t().
+with_body(#response{} = R, Body) ->
     check_body(Body),
     R#response{body = Body}.
 
@@ -82,8 +86,8 @@ live(#response{}, _Kind) ->
 -spec live(t()) -> undefined | normal | one_way | two_way.
 live(#response{live = Kind}) -> Kind.
 
--spec header(iodata(), t()) -> {ok, binary()} | error.
-header(Name, #response{headers = Hs}) ->
+-spec header(t(), iodata()) -> {ok, binary()} | error.
+header(#response{headers = Hs}, Name) ->
     case lists:keyfind(lower(Name), 1, Hs) of
         {_, V} -> {ok, V};
         false -> error

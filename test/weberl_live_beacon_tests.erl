@@ -98,15 +98,15 @@ iodata_body_test() ->
     ?assertEqual(<<"a", T/binary, "</body>">>, injected([<<"a">>, ["</", "body>"]])).
 
 keeps_status_and_headers_test() ->
-    R0 = weberl_response:with_header(<<"x-a">>, <<"1">>, weberl_response:html(201, <<"x">>)),
+    R0 = weberl_response:with_header(weberl_response:html(201, <<"x">>), <<"x-a">>, <<"1">>),
     R = weberl_live_beacon:inject(R0, {<<"I">>, two_way}),
     ?assertEqual(201, weberl_response:status(R)),
-    ?assertEqual({ok, <<"1">>}, weberl_response:header(<<"x-a">>, R)).
+    ?assertEqual({ok, <<"1">>}, weberl_response:header(R, <<"x-a">>)).
 
 injectable_test_() ->
     Resp = fun(S, Type) ->
-                   weberl_response:with_header(<<"content-type">>, Type,
-                                               weberl_response:new(S, [], <<"x">>))
+                   weberl_response:with_header(weberl_response:new(S, [], <<"x">>),
+                                               <<"content-type">>, Type)
            end,
     [?_assert(weberl_live_beacon:injectable(weberl_response:html(200, <<"x">>))),
      ?_assert(weberl_live_beacon:injectable(Resp(201, <<"TEXT/HTML">>))),

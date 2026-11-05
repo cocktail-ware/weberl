@@ -8,5 +8,5 @@
 
 handle(_Request) ->
     weberl_response:with_header(
-      <<"cache-control">>, <<"public, max-age=60">>,
-      weberl_response:html(200, <<"<!DOCTYPE html><html><body><h1>Cached</h1></body></html>">>)).
+      weberl_response:html(200, <<"<!DOCTYPE html><html><body><h1>Cached</h1></body></html>">>),
+      <<"cache-control">>, <<"public, max-age=60">>).
