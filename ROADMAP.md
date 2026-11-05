@@ -34,7 +34,10 @@ specification; kept here so they don't clutter active work.
   A `live_secret_previous` that is tried for decryption (and re-encrypted on write) would allow rotation.
 - Revocation needs server-side state; an optional store behaviour (as Arizona's `arizona_session_store`)
   could sit behind the same functions, with the cookie carrying only an id.
-- Flash on top of the session (`weberl_flash:get/1`, `take/2`, `keep/2`), next.
+- Flash (`weberl_flash`) lives in the session under a reserved key. If a flash that has to survive
+  much longer than `flash_ttl`, or one for a user with no session cookie at all, is ever wanted, it could
+  have its own cookie; an automatic `take` (a route option or a layout hook) is possible if explicit
+  `take` proves tedious.
 
 ## Request
 - `weberl_request:path/1` is the raw requested path (not percent-decoded, not

@@ -113,8 +113,12 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
 - **6a, sessions: done** (721 eunit tests). `weberl_session` (cookie codec, ambient request,
   `finalize/2`), response/request functions as above, `weberl_sign:key/1`, `weberl_cookie:secure/0`;
   dispatch wraps the handler in `weberl_session:run/2` and finalizes. Tests: `weberl_session_tests`,
-  `weberl_test_cookie_adapter` (cookie-parsing stub adapter for hand-built requests). **Next: 6b flash**
-  on top of the session (reserved key, own short expiry; `get/1`, `take/2`, `keep/2`), then 5, 2, 3.
+  `weberl_test_cookie_adapter` (cookie-parsing stub adapter for hand-built requests). **6b flash: done**
+  (`weberl_flash`: `put/3`, `get/1,2`, `take/2`, `keep/2`; reserved session key `'$weberl_flash'` holding
+  `{WrittenAt, Map}`, `flash_ttl` 300 s; `take` removes only what the request delivered; `weberl_flash_tests`,
+  16 tests, incl. a 3-hop HTTP chain with a pass-through redirect). **Next: 5, then 2, then 3** (user's
+  order; 5 and 2 are discussions, 2 and 3 need design decisions meant to generalise to other
+  template libraries).
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

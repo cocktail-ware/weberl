@@ -197,6 +197,7 @@ setting you should treat as required in production is `live_secret`.
 | `csrf_origins` | `[]` | extra trusted origins for the [CSRF](#csrf-protection) Origin check (binaries such as `<<"https://app.example">>`). |
 | `session_ttl` | `172800` | seconds a new [session](#session) lives (two days). |
 | `session_warn_bytes`, `session_max_bytes` | `3000`, `3800` | session cookie size (name + value) that logs a warning, and the hard limit (a `500`); the limit never exceeds 4096. |
+| `flash_ttl` | `300` | seconds an unread [flash](#flash) lives. |
 | `secure_cookies` | `false` | `true` makes the cookies Weberl sets itself (CSRF, session, flash) `Secure` and `__Host-`-prefixed. **Set it in production** (HTTPS); a `Secure` cookie is dropped over plain HTTP, which breaks local development. |
 | `live_subscribe_timeout` | `10000` | ms a freshly opened WebSocket may wait to subscribe its first page before it is closed. |
 | `live_attach_timeout` | `30000` | ms a rendered page may wait for its first connection before the session ends. |
@@ -550,6 +551,34 @@ Limits to know: there is no server-side record, so a session **cannot be revoked
 works until it expires (an application that needs revocation keeps an id or version in the session and
 checks it against its own storage). The key comes from `live_secret`: without it a restart ends every
 session (a warning is logged the first time a session is written), and rotating it does the same.
+
+### Flash
+
+Short messages for the next page, the post/redirect/get companion. A flash is a map `#{Key => Value}`
+(any terms) kept in the [session](#session) under a reserved key, with its own expiry (`flash_ttl`, default
+300 seconds, however long the session lives). Using flash creates a session cookie if there is none.
+
+```erlang
+%% after a POST: say it, then redirect
+weberl_flash:put(weberl_response:redirect("/login"), error, <<"Wrong password">>)
+
+%% the page that shows it: read it and clear it
+{Flash, Response} = weberl_flash:take(Request, weberl_response:html(200, Html))
+```
+
+| Function | |
+|---|---|
+| `weberl_flash:put(Response, Key, Value)` | add to the flash this response sends (an unread flash is kept, the same key replaced) |
+| `weberl_flash:get(Request)`, `get(Request, Key)` | what the request carried (`#{}` when none or expired); **does not clear** |
+| `weberl_flash:take(Request, Response)` | `{Flash, Response}`: the request's flash, and the response with it removed |
+| `weberl_flash:keep(Request, Response)` | put the request's flash into the response: for a handler that called `take` (or `reset_session`) and wants it to reach the next page after all |
+
+Reading does not clear, so a handler that never calls `take` leaves the flash where it is: a redirect that
+does not touch flash passes it on (it sends no cookie at all), and in a chain A → B → C the flash shows
+at C when only C takes it. Only what the request delivered is removed: a flash the same response `put`
+for the next page survives `take`, in either order. A page that only calls `get` shows the flash again
+until something takes it. Put flash on pages that display it with `take`; `keep` gives the messages a fresh
+`flash_ttl`.
 
 ### Dispatch, errors and metadata
 
