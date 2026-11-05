@@ -25,6 +25,21 @@ specification; kept here so they don't clutter active work.
 - Once templates have conditionals and URL-safe interpolation (feedback items 2 and 3), a plain
   `<form>` with `{{ csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
 
+## Template blocks inside tags and attributes
+- `{: if :}`, `{: case :}` and `{: for :}` (see HANDOFF "2") first stand only in HTML text. To extend, as a
+  design of its own:
+  - conditional **attributes**: boolean ones (`checked`, `disabled`, `selected`, `hidden`) and optional
+    values, for example `<input {: if @on :}checked{: /if :}>` or an attribute with a computed value;
+  - **class lists** and similar token lists (`class="{: for ... :}"`), where whitespace between tokens
+    matters and a naive block leaves stray spaces;
+  - conditionals **inside a start tag** in general (the HTML context after a branch must be the same as
+    before it, which the tracker can check in `in_tag` just as it does in text) and inside **quoted
+    attribute values**, with the escaping rules that go with each position;
+  - what stays refused: `<script>`, `<style>` and event-handler attributes (they need context-specific
+    encoding, as for interpolation today), and URL attributes until the safe-URL design (feedback item 3).
+- Whitespace control for block tags (trimming a block tag that stands alone on its line, trimming around
+  a tag) as a small additive marker; today output is literal and nothing is trimmed.
+
 ## Layouts chosen at runtime
 - Today a view's layout is fixed when the router starts: layout and view are composed at compile time
   into one generated module per view. The user wants templates rendered with a layout chosen at runtime

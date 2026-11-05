@@ -139,13 +139,31 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   sketch: pre-scan the expression text turning `@name` into a reserved variable (skipping strings, quoted
   atoms, char literals), `erl_scan`/`erl_parse:parse_exprs`, then replace those variables with a runtime
   assign lookup (`missing_variable` as elsewhere). Templates are developer code (like `.erl`), user input is
-  rendered, never evaluated. Open points still to decide in order: 2 truthiness (recommended strict
-  booleans, optional values passed as `undefined`, `case` for optional messages), 3 the forms
-  (`if`/`else`, `case`/`of`, `for`/`empty`), 4 where they may stand (HTML text only; no `content`/slot/fill
-  inside; attribute-level conditions a separate design), 5 regions inside `if`/`for` (region in `for`
-  forbidden until dynamic region names exist), 6 compilation (`case`, list comprehensions to iodata, loop
-  variables excluded from region dependencies), 7 the documented boundary for reuse by other template
-  libraries. Item 3 (safe URLs) follows and depends on this.
+  rendered, never evaluated. **Decision 2 (user, 2026-11-05): accepted.** `if` conditions must be exactly `true`
+  or `false` (`{not_boolean, View, Line, Value}` otherwise); optional values are passed as `undefined` and
+  tested explicitly (`@error =/= undefined`) or, better, matched with `case` (test and bind in one step);
+  no Jinja-style truthiness. Rules: Erlang's operators as written (`andalso`/`orelse` short-circuit,
+  `and`/`or` need booleans); a missing `@name` is `missing_variable` even inside a condition; `case` branches
+  are Erlang patterns with an optional `when` guard and an unmatched `case` raises `{case_clause, ...}` (a
+  trailing `_` opts out); `{{ Msg }}` (capitalized) reads a local variable through the same value rules as an
+  assign (`unsupported_value` for other terms) and `{{{ Msg }}}` is raw. **Decision 3 (user): the forms accepted**: `{: if Expr :}` / `{: elif Expr :}` / `{: else :}` /
+  `{: /if :}`; `{: case Expr :}` / `{: of Pattern [when Guard] :}` / `{: /case :}` (only whitespace between
+  `case` and the first `of`); `{: for Qualifiers :}` / `{: empty :}` / `{: /for :}` (anything Erlang allows after
+  `||`: generators, filters, several qualifiers, map generators; `empty` renders when nothing matched);
+  closers carry no name, mismatches name both lines; `elif`/`else`/`of`/`empty` only inside their parent;
+  pattern/generator variables are scoped to their branch or body (an already bound name is an error);
+  the tag ends at the first `:}` (documented limitation); `if elif else case of for empty` become reserved
+  block names. **Decision 4 (user): accepted, for now**: blocks only where the HTML context is plain text
+  (`{block_in_unsupported_context, Kind, Where}` elsewhere: in tags, attribute values, script/style,
+  comments); each branch/body is walked from text and must end in text (element nesting is not checked,
+  as for regions); any nesting depth, regions may contain blocks; `{: content :}` and `{: slot :}` may stand
+  inside `if`/`case` branches (content still at most once) but not inside `for`; `{: fill :}` stays top-level
+  in a view; compile-time composition must find them at any depth of `if`/`case`; whitespace is literal
+  (nothing trimmed); conditions inside tags and attributes are NOT in v1 (extension recorded in
+  `ROADMAP.md`). **Still to decide, in order**: 5 regions inside `if`/`case`/`for` (recommended: allowed
+  in branches; forbidden in `for` until dynamic region names exist), 6 compilation (`case`, list
+  comprehensions to iodata, loop variables excluded from region dependencies), 7 the documented boundary
+  for reuse by other template libraries. Item 3 (safe URLs) follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`
