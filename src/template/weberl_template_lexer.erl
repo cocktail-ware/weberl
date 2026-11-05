@@ -8,9 +8,10 @@
 %% `Line' is the line of the first character of the token. `Text' is the
 %% Erlang expression exactly as written between the delimiters (the parser reads it
 %% with `weberl_blocks_expr'; its newlines count towards the template's line
-%% numbers). The tag ends at the first `}}' (`}}}' for the raw form), so an
-%% expression that contains those characters needs a space: `#{a => #{b => 1} }'.
-%% A backslash directly
+%% numbers). The tag ends at the first `}}' (`}}}' for the raw form) that is not part
+%% of the Erlang inside: `weberl_blocks_expr:tag_end/2' reads strings, quoted atoms,
+%% character literals and comments as opaque and keeps a bracket depth, so
+%% `#{a => #{b => 1}}' and `f("}}")' need no care. A backslash directly
 %% before `{{' yields a literal `{{'. Block tags `{: ... :}' (statements) give
 %% <ul>
 %%   <li>`{block_open, Line, region, Name, #{tag => Binary}}' for
@@ -30,7 +31,8 @@
 %% Errors:
 %% `{error, {syntax_error, File, Line, Reason}}' with Reason
 %% `unterminated_interpolation | unterminated_raw_interpolation |
-%% unterminated_block_tag | empty_interpolation | {missing_expression, Kind} |
+%% unterminated_block_tag | unterminated_string | unbalanced_brace |
+%% empty_interpolation | {missing_expression, Kind} |
 %% {invalid_block_tag, Text} | {invalid_region_tag, Tag}'.
 -module(weberl_template_lexer).
 
@@ -74,13 +76,16 @@ scan(<<C, R/binary>>, Line, Text, Acc) ->
     scan(R, Line, <<Text/binary, C>>, Acc).
 
 interp(Mode, Close, Rest, Line, Acc) ->
-    case binary:match(Rest, Close) of
-        nomatch ->
+    case weberl_blocks_expr:tag_end(Rest, Close) of
+        {error, unterminated} ->
             throw({lex_error, Line, case Mode of
                                         raw -> unterminated_raw_interpolation;
                                         escaped -> unterminated_interpolation
                                     end});
-        {Pos, Len} ->
+        {error, Error} ->
+            tag_error(Error, Line);
+        {ok, Pos} ->
+            Len = byte_size(Close),
             Content = binary:part(Rest, 0, Pos),
             After = binary:part(Rest, Pos + Len, byte_size(Rest) - Pos - Len),
             string:trim(Content, both, " \t\r\n") =/= <<>>
@@ -89,12 +94,17 @@ interp(Mode, Close, Rest, Line, Acc) ->
             scan(After, Line2, <<>>, [{interp, Line, Mode, Content} | Acc])
     end.
 
+%% A tag whose Erlang text cannot be delimited (see `weberl_blocks_expr:tag_end/2').
+tag_error({Reason, Lines}, Line) -> throw({lex_error, Line + Lines, Reason}).
+
 %% A block tag `{: ... :}' (statements, as opposed to the values of `{{ }}').
 block(Rest, Line, Acc) ->
-    case binary:match(Rest, <<":}">>) of
-        nomatch ->
+    case weberl_blocks_expr:tag_end(Rest, <<":}">>) of
+        {error, unterminated} ->
             throw({lex_error, Line, unterminated_block_tag});
-        {Pos, 2} ->
+        {error, Error} ->
+            tag_error(Error, Line);
+        {ok, Pos} ->
             Content = binary:part(Rest, 0, Pos),
             After = binary:part(Rest, Pos + 2, byte_size(Rest) - Pos - 2),
             Token = block_token(Content, Line),

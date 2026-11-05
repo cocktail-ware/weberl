@@ -33,8 +33,14 @@
 %% name an earlier qualifier already bound) and `{reserved_variable, Name}'.
 -module(weberl_blocks_expr).
 
--export([expression/2, clause/2, qualifiers/2, render/2]).
--export_type([hooks/0, parsed/0, error/0]).
+-export([expression/2, clause/2, qualifiers/2, render/2, tag_end/2]).
+-export_type([hooks/0, parsed/0, error/0, tag_error/0]).
+
+%% Why a tag text could not be delimited; `Lines' is the number of line breaks before
+%% the offending character, counted from the start of the text.
+-type tag_error() :: unterminated
+                   | {unterminated_string, Lines :: non_neg_integer()}
+                   | {unbalanced_brace, Lines :: non_neg_integer()}.
 
 -type hooks() :: #{assign := fun((atom(), erl_anno:anno()) -> erl_parse:abstract_expr()),
                    local := fun((atom()) -> atom())}.
@@ -273,3 +279,70 @@ render(L, Hooks) when is_list(L) ->
     [render(E, Hooks) || E <- L];
 render(Other, _Hooks) ->
     Other.
+
+%% ---------------------------------------------------------------------
+%% Finding the end of a tag
+
+%% @doc Where the tag whose text starts at `Text' ends: the byte offset of the first
+%% `Close' (`}}', `}}}' or `:}') that is not part of the Erlang inside.
+%%
+%% The text is read as Erlang: strings, quoted atoms, character literals (`$}') and
+%% comments are opaque, and a depth is kept for `(', `[', `{' and `<<', so `Close'
+%% counts only at depth 0. `{{ #{k => #{j => 1}} }}' and `{{ f("}}") }}' therefore
+%% end where the author means. A closing bracket that matches nothing is
+%% `{unbalanced_brace, Lines}', a string that never ends `{unterminated_string,
+%% Lines}'; running out of text is `unterminated'.
+-spec tag_end(binary(), binary()) -> {ok, non_neg_integer()} | {error, tag_error()}.
+tag_end(Text, Close) ->
+    tag_end(Text, Close, byte_size(Close), 0, [], 0).
+
+tag_end(<<>>, _Close, _Size, _Pos, _Stack, _Lines) ->
+    {error, unterminated};
+tag_end(Bin, Close, Size, Pos, [], _Lines) when binary_part(Bin, 0, min(Size, byte_size(Bin))) =:= Close ->
+    {ok, Pos};
+tag_end(<<Q, Rest/binary>>, Close, Size, Pos, Stack, Lines) when Q =:= $"; Q =:= $' ->
+    case quoted(Rest, Q, 1, 0) of
+        {ok, Len, Newlines, After} -> tag_end(After, Close, Size, Pos + Len, Stack, Lines + Newlines);
+        error -> {error, {unterminated_string, Lines}}
+    end;
+tag_end(<<$$, $\\, _, Rest/binary>>, Close, Size, Pos, Stack, Lines) ->
+    tag_end(Rest, Close, Size, Pos + 3, Stack, Lines);
+tag_end(<<$$, C, Rest/binary>>, Close, Size, Pos, Stack, Lines) ->
+    tag_end(Rest, Close, Size, Pos + 2, Stack, Lines + newline(C));
+tag_end(<<$%, Rest/binary>>, Close, Size, Pos, Stack, Lines) ->
+    {Len, After} = comment(Rest, 1),
+    tag_end(After, Close, Size, Pos + Len, Stack, Lines);
+tag_end(<<"<<", Rest/binary>>, Close, Size, Pos, Stack, Lines) ->
+    tag_end(Rest, Close, Size, Pos + 2, [$> | Stack], Lines);
+tag_end(<<">>", Rest/binary>>, Close, Size, Pos, [$> | Stack], Lines) ->
+    tag_end(Rest, Close, Size, Pos + 2, Stack, Lines);
+tag_end(<<C, Rest/binary>>, Close, Size, Pos, Stack, Lines) when C =:= $(; C =:= $[; C =:= ${ ->
+    tag_end(Rest, Close, Size, Pos + 1, [closer(C) | Stack], Lines);
+tag_end(<<C, Rest/binary>>, Close, Size, Pos, [C | Stack], Lines) when C =:= $); C =:= $]; C =:= $} ->
+    tag_end(Rest, Close, Size, Pos + 1, Stack, Lines);
+tag_end(<<"}}", _/binary>>, <<"}}}">>, _Size, _Pos, [], _Lines) ->
+    %% a raw tag closed with two braces: it is missing one, not unbalanced
+    {error, unterminated};
+tag_end(<<C, _/binary>>, _Close, _Size, _Pos, _Stack, Lines) when C =:= $); C =:= $]; C =:= $} ->
+    {error, {unbalanced_brace, Lines}};
+tag_end(<<C, Rest/binary>>, Close, Size, Pos, Stack, Lines) ->
+    tag_end(Rest, Close, Size, Pos + 1, Stack, Lines + newline(C)).
+
+closer($() -> $);
+closer($[) -> $];
+closer(${) -> $}.
+
+newline($\n) -> 1;
+newline(_) -> 0.
+
+%% The rest of a quoted string or atom after the opening quote `Q': its length with
+%% both quotes, the line breaks inside and what follows.
+quoted(<<>>, _Q, _Len, _Newlines) -> error;
+quoted(<<$\\, C, Rest/binary>>, Q, Len, Newlines) -> quoted(Rest, Q, Len + 2, Newlines + newline(C));
+quoted(<<Q, Rest/binary>>, Q, Len, Newlines) -> {ok, Len + 1, Newlines, Rest};
+quoted(<<C, Rest/binary>>, Q, Len, Newlines) -> quoted(Rest, Q, Len + 1, Newlines + newline(C)).
+
+%% The rest of a comment after `%', up to the line break (which stays in the text).
+comment(<<$\n, _/binary>> = Rest, Len) -> {Len, Rest};
+comment(<<_, Rest/binary>>, Len) -> comment(Rest, Len + 1);
+comment(<<>>, Len) -> {Len, <<>>}.

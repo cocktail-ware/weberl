@@ -650,8 +650,9 @@ just text. Expressions are developer code, evaluated on every render (and every 
 them pure and cheap. User input is rendered, never evaluated. There are no includes, components or
 filters in this version.
 
-The tag ends at the first `}}` (`}}}` for the raw form), so two closing braces of the expression itself
-need a space between them: `{{ maps:get(k, #{k => #{j => 1} }) }}`. Expressions may span lines; a
+The tag ends at the first `}}` (`}}}` for the raw form) outside the Erlang inside: strings, quoted atoms,
+character literals and comments are skipped and brackets are counted, so
+`{{ maps:get(k, #{k => #{j => 1}}) }}` and `{{ f("}}") }}` work as written. Expressions may span lines; a
 syntax error reports the template line of the offending token (`{invalid_expression, Text,
 Message}`), `{{ 1, 2 }}` is `{not_a_single_expression, Text}`.
 
@@ -728,7 +729,7 @@ Blocks take Erlang: conditions, patterns and generators are Erlang expressions, 
   of a view. A view put inside a layout branch that binds a name the view binds too is an error after
   composition.
 - Output is literal: block tags leave their line breaks behind, nothing is trimmed. Keywords need white space
-  after them (`{: if @a :}`, not `{: if(@a) :}`); a tag ends at the first `:}`; closing tags carry no name.
+  after them (`{: if @a :}`, not `{: if(@a) :}`); a tag ends at the first `:}` outside the Erlang inside; closing tags carry no name.
 - Block structure errors: `{unclosed_block, Kind}`, `{unexpected_block_end, Kind}`,
   `{mismatched_block_end, Open, Got}`, `{misplaced_block_tag, Tag}` (`else`, `elif`, `of`, `empty` outside
   their block, twice, or after `else`), `case_without_of`, `{missing_expression, Kind}`.

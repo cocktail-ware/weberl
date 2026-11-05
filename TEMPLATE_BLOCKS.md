@@ -29,8 +29,11 @@ block structure, scope and code generation from the three Weberl modules above.
 ### Interpolation
 
 `{{ Expr }}` inserts the value of an Erlang expression, escaped by the host; `{{{ Expr }}}` inserts it as
-is. The tag ends at the first `}}` (`}}}`), so two closing braces of the expression itself need a space:
-`{{ maps:get(k, #{k => #{j => 1} }) }}`. Expressions may span lines.
+is. The tag ends at the first `}}` (`}}}`) that is not part of the Erlang inside: the text is read like
+Erlang (strings, quoted atoms, `$x` character literals and comments are opaque; `( [ { <<` are counted), so
+`{{ maps:get(k, #{k => #{j => 1}}) }}` and `{{ f("}}") }}` need no care. An unmatched closing bracket is
+`{unbalanced_brace}`, a string that never ends `{unterminated_string}` (both with the line). Expressions may
+span lines. A `%` starts an Erlang comment that runs to the end of the line, closing braces included.
 
 ### Assigns and locals
 
@@ -50,7 +53,8 @@ is. The tag ends at the first `}}` (`}}}`), so two closing braces of the express
 {: for Qualifiers :} ... {: empty :} ... {: /for :}
 ```
 
-* Keywords are followed by white space; a tag ends at the first `:}`; closing tags carry no name.
+* Keywords are followed by white space; a tag ends at the first `:}` outside the Erlang inside (read as
+  for `{{ }}`); closing tags carry no name.
 * **`if`**: each condition is exactly `true` or `false`, otherwise `{not_boolean, View, Line, Value}`. No
   truthiness. Only the taken branch is evaluated; no `else` renders nothing.
 * **`case`**: Erlang's `case`. Between `case` and the first `of` only white space. No match raises
@@ -121,8 +125,9 @@ others in github mnussbaumer/cssex) is the natural acceptance set for the port.
 
 ## Known limits
 
-* A tag ends at the first `}}` / `:}`: an expression or clause containing those characters needs a space or an
-  escape.
+* A bracket that never closes inside a tag swallows text up to the next closing delimiter that fits (the
+  scanner reports `unbalanced_brace` or `unterminated_*` when it can tell); a `%` comment inside a tag hides
+  the rest of its line, closing delimiter included.
 * An assign inside a guard that is not a `case` clause (for example a `fun` with a guard inside an expression)
   hits Erlang's guard rules; the compile error is Erlang's (`illegal_guard_expr`).
 * A map generator iterates in Erlang's map order.

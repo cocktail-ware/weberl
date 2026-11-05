@@ -65,11 +65,59 @@ an_at_sign_in_a_literal_is_not_an_assign_test() ->
     ?assertEqual(<<"a@b">>, render(<<"{{ \"a@b\" }}">>, #{})),
     ?assertEqual(<<"user@host">>, render(<<"{{ user@host }}">>, #{})).
 
-the_tag_ends_at_the_first_closing_braces_test() ->
-    %% a space keeps two closing braces of the expression apart
+%% ---------------------------------------------------------------------
+%% Where a tag ends (HANDOFF decision 10): the Erlang inside is read, not searched for `}}'
+
+nested_maps_need_no_space_before_the_closing_braces_test() ->
+    ?assertEqual(<<"1">>, render(<<"{{ maps:get(j, maps:get(k, #{k => #{j => 1}})) }}">>, #{})),
     ?assertEqual(<<"1">>, render(<<"{{ maps:get(j, maps:get(k, #{k => #{j => 1} })) }}">>, #{})),
-    {1, Reason} = err(<<"{{ #{a => #{b => 1}} }}">>),
-    ?assertMatch({invalid_expression, _, _}, Reason).
+    ?assertEqual(<<"1">>, render(<<"{{{ maps:get(j, maps:get(k, #{k => #{j => 1}})) }}}">>, #{})),
+    %% the tag's own braces right after a map
+    ?assertEqual(<<"1">>, render(<<"{{ maps:get(k, #{k => 1}) }}">>, #{})),
+    ?assertEqual(<<"2">>, render(<<"{{ maps:size(#{a => #{}, b => 1})}}">>, #{})).
+
+tuples_inside_tuples_end_where_the_author_means_test() ->
+    ?assertEqual(<<"b">>, render(<<"{{ element(2, element(1, {{a, b}, c})) }}">>, #{})),
+    ?assertEqual(<<"c">>, render(<<"{{ element(2, {{a, b}, c}) }}">>, #{})).
+
+closing_braces_in_strings_do_not_end_the_tag_test() ->
+    ?assertEqual(<<"a }} b">>, render(<<"{{ \"a }} b\" }}">>, #{})),
+    ?assertEqual(<<"a {{ b">>, render(<<"{{ \"a {{ b\" }}">>, #{})),
+    ?assertEqual(<<"x}}y">>, render(<<"{{{ \"x}}y\" }}}">>, #{})),
+    ?assertEqual(<<"}}">>, render(<<"{{ '}}' }}">>, #{})),
+    %% a string with braces inside a tuple inside a tag, then text with a second tag
+    ?assertEqual(<<"true {{|2">>,
+                 render(<<"{{ element(2, element(1, {{a, \"true {{\"}, 1})) }}|{{ 1 + 1 }}">>, #{})).
+
+character_literals_and_escapes_do_not_end_the_tag_test() ->
+    ?assertEqual(<<"125">>, render(<<"{{ $} }}">>, #{})),
+    ?assertEqual(<<"34">>, render(<<"{{ $\" }}">>, #{})),
+    ?assertEqual(<<"a\"b">>, render(<<"{{{ \"a\\\"b\" }}}">>, #{})).
+
+a_comment_inside_a_tag_hides_the_closing_braces_until_its_line_ends_test() ->
+    ?assertEqual(<<"3">>, render(<<"{{ 1 + 2 % }} not the end\n }}">>, #{})).
+
+an_unbalanced_closing_bracket_is_named_with_its_line_test() ->
+    ?assertEqual({1, unbalanced_brace}, err(<<"{{ a} }}">>)),
+    ?assertEqual({3, unbalanced_brace}, err(<<"x\ny\n{{ (a }} {{ b }}">>)),
+    ?assertEqual({2, unbalanced_brace}, err(<<"{{ {a,\n b) }}">>)),
+    ?assertEqual({1, unbalanced_brace}, err(<<"{{{ a} }}} {{ b }}">>)),
+    %% a raw tag closed with two braces is missing one
+    ?assertEqual({1, unterminated_raw_interpolation}, err(<<"{{{ @x }} text">>)).
+
+an_unterminated_string_is_named_with_its_line_test() ->
+    ?assertEqual({1, unterminated_string}, err(<<"{{ \"abc }}">>)),
+    ?assertEqual({2, unterminated_string}, err(<<"x\n{{ 'abc }}\ny">>)),
+    ?assertEqual({3, unterminated_string}, err(<<"{{ [1,\n 2,\n \"x ] }}">>)).
+
+an_open_tag_without_an_end_is_still_unterminated_test() ->
+    ?assertEqual({1, unterminated_interpolation}, err(<<"{{ a + ">>)),
+    ?assertEqual({1, unterminated_raw_interpolation}, err(<<"{{{ a + ">>)).
+
+block_tags_end_at_the_first_closing_mark_outside_the_erlang_inside_test() ->
+    ?assertEqual(<<"a">>, render(<<"{: if \":}\" =:= \":}\" :}a{: /if :}">>, #{})),
+    ?assertEqual(<<"x">>, render(<<"{: case {$:, $:} :}{: of {$:, $:} :}x{: /case :}">>, #{})),
+    ?assertEqual({1, unterminated_string}, err(<<"{: if \"a :} :}b{: /if :}">>)).
 
 an_expression_with_a_string_containing_angle_brackets_test() ->
     ?assertEqual(<<"1 &lt; 2">>, render(<<"{{ \"1 < 2\" }}">>, #{})).
@@ -98,7 +146,7 @@ an_expression_that_raises_is_not_swallowed_test() ->
 syntax_errors_carry_the_template_line_test() ->
     ?assertMatch({2, {invalid_expression, <<" 1 + ">>, _}}, err(<<"a\n{{ 1 + }}">>)),
     %% inside a multi-line expression: the line of the offending token
-    ?assertMatch({3, {invalid_expression, _, _}}, err(<<"{{\n @a +\n )\n}}">>)),
+    ?assertMatch({3, {invalid_expression, _, _}}, err(<<"{{\n @a +\n *\n}}">>)),
     ?assertMatch({4, {invalid_expression, _, _}}, err(<<"x\ny\nz\n{{ @a @b }}">>)).
 
 more_than_one_expression_is_an_error_test() ->

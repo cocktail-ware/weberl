@@ -162,7 +162,7 @@ case_errors_test() ->
     ?assertEqual({1, content_before_first_of}, err(<<"{: case @v :}{{ @v }}{: of a :}A{: /case :}">>)),
     ?assertEqual({1, case_without_of}, err(<<"{: case @v :}{: /case :}">>)),
     ?assertMatch({1, {assign_in_pattern, x}}, err(<<"{: case @v :}{: of @x :}A{: /case :}">>)),
-    ?assertMatch({1, {invalid_expression, _, _}}, err(<<"{: case @v :}{: of {a, :}A{: /case :}">>)).
+    ?assertMatch({1, {invalid_expression, _, _}}, err(<<"{: case @v :}{: of a b :}A{: /case :}">>)).
 
 %% ---------------------------------------------------------------------
 %% for / empty

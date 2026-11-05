@@ -246,6 +246,71 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   (`arizona_flash`, HMAC with `secret_key`, purpose label); sessions are a signed cookie or a
   server-side store behind the `arizona_session_store` behaviour. It has no form parser.
 
+- **Decision 8 (safe URLs, item 3; user accepted 2026-11-05; recorded before building).** Explicit, not
+  implicit-by-position. In a URL attribute an interpolation must be a **tagged value** `{weberl_url, Kind, Data}`
+  returned by a `weberl_url` helper; an untagged value raises `{untagged_url, View, Source, Value}`. The
+  **attribute decides the policy at render time** (the helper does not know where it ends up):
+  - helpers: `ensure_path(V)` (a path on this site: starts with a single `/`, not `//` or `/\`, no control
+    characters; **not** a full URL; raises otherwise, via `weberl_url:local/1`), `url(V)` (local path or
+    `http`/`https`, for user-supplied links), `component(V)` (one percent-encoded segment), `query(Map)`
+    (encoded `k=v&k=v`), `router_path(Path)`/`router_path(Path, Query)` (a local path whose `Path` must be a
+    route in the running router's table, else `{unknown_route, Path}`), `router_url(Path[, Query])` (the same
+    check, absolute, using config `public_url`; `{no_public_url}` when unset; the `Host` header is not used),
+    and `unsafe_url(V)` (skips every check: scheme, local-only, dangerous sink; **still HTML-escapes**, so a
+    quote cannot leave the attribute).
+  - `component` and `query` need a literal prefix in the attribute (a leading one is a compile error).
+  - attributes: `href`, `action`, `formaction`, `cite`, `xlink:href` take local paths and `http(s)`; `src` and
+    `poster` on `img`/`audio`/`video`/`source`/`track` the same; **dangerous sinks** (`<script src>`,
+    `<iframe src>`, `<embed src>`, `<object data>`, `<base href>`, `<link href>`) take local paths only, and
+    only `unsafe_url` goes beyond. Literal-only (interpolation still rejected): `style`, `on*`, `srcdoc`, `is`,
+    `srcset`, `data`, `ping`, `usemap`, `manifest`, `codebase`, `longdesc`, `background`; raw `{{{ }}}` in any
+    attribute stays rejected.
+  - router checks are against **static paths only** (`weberl_table:lookup/2` is an exact lookup). Dynamic
+    paths are future work (`ROADMAP.md`); until then an app uses `ensure_path` + `component` for unverified
+    links (agentic does this).
+  - still to decide (superseded by decision 9): how a helper reaches the router table from inside a render.
+- **Decision 9 (router verification of links; user, 2026-11-05).** The route table exists before templates
+  compile (`weberl_router_server:start/3`: `weberl:build` then `weberl_views:prepare(Router, Table)`), so the
+  check is a **compile error**, with a render-time backstop.
+  - `weberl_template:compile/3` (and `compile_file`) take an options map with `routes => Table`;
+    `weberl_views:prepare` passes it. Without `routes` the compile-time route check is **explicitly skipped**
+    (documented, with a test); no test wrapper. Tests build a table with `weberl_route:new/4` and
+    `weberl_table:assemble/2`.
+  - `router_path("/agents")` (literal): checked at compile time, a miss fails the router start with file and line
+    (`{unknown_route, Path}`).
+  - `router_path(@target)` (fully dynamic argument): **compile error**, nothing is verifiable; use `ensure_path`.
+  - `router_path("/something/{{ @x }}/{{ @y }}")`: placeholders `{{ Expr }}` (same expression front end,
+    so `@name` works) inside the first string argument of `router_path`/`router_url`; only recognised there, in
+    any other string `{{` is plain text. This works because of the **tag-end scanner** (decision 10), which
+    treats the string as opaque. (An earlier draft used `{: @x :}`; dropped: `{: :}` is the block-tag
+    delimiter.) Each placeholder is **exactly one segment** (rendered percent-encoded like
+    `component`). If no route has that shape: `unknown_route` compile error. If one does: a compile **warning**
+    (the value is unknown), silenced by `#{no_warn => true}`. At render the built path is looked up in the table,
+    else `{unknown_route, Path}`; `"/something/{{ @x }}/"` against a route `/something/a/b` raises, the author
+    writes one placeholder per dynamic segment.
+  - second argument is an options map `#{router => Name, no_warn => boolean()}`; `router` replaces the ambient
+    router at render time and, at compile time, selects that router's table when it is running (else the compile
+    check is skipped).
+  - render-time backstop: the ambient router name (process dictionary; set by dispatch and by a live session,
+    which remembers it like its assigns), raising `{no_router}` outside a request; applies for placeholders and
+    any call the compiler cannot see.
+  - warnings are returned with the compile result and logged by `weberl_views:prepare` with file and line.
+  - known limit: a view mounted in two routers with different tables is compiled against the router that started
+    last; the render-time check uses the request's own router.
+- **Decision 10 (tag ends are found by an Erlang-aware scanner; user, 2026-11-05).** Replaces "a tag ends at the
+  first `}}`/`:}`". Delimiters stay `{{ }}`, `{{{ }}}`, `{: :}` (alternatives `{: :}`/`{:: ::}` for
+  interpolation and a plain `{{`/`}}` counter were considered and rejected: the counter breaks on
+  `{{ {{a, b}, c} }}` and `#{k => #{j => 1}}`; the swap merges the interpolation and block namespaces and
+  collides with Erlang's `case`/`if` expressions). The scanner lives in `weberl_blocks_expr` (no Weberl or HTML
+  knowledge, reusable by csserl). While looking for the end of a tag it treats strings `"..."`, quoted atoms,
+  character literals (`$}`, `$"`) and comments as opaque, keeps a depth for `( [ { <<`, and ends the tag at
+  `}}` (`}}}` for raw) / `:}` only at depth 0. Effects: `{{ f("{{ @x }}") }}` and
+  `{{ #{k => #{j => 1}} }}` work without a space; `{{{ #{a => 1} }}}` works. Errors:
+  `{unterminated_string, Line}`, `{unbalanced_brace, Line}`. The "Known limits" entry in `TEMPLATE_BLOCKS.md`
+  and the README sentence about `}}` are rewritten when this is built. Tests: braces in strings, nested
+  maps/tuples without a space, `$}` and `$"`, unterminated string, unbalanced brace, raw with a map.
+- Plan for the feedback (proposal; the user decides order and each design point), continued below:
+
 ### Plan for the feedback (proposal; the user decides order and each design point)
 
 Rules as always: **one design point at a time**, record the decision here or in the README

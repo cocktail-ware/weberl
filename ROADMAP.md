@@ -40,6 +40,12 @@ specification; kept here so they don't clutter active work.
 - Whitespace control for block tags (trimming a block tag that stands alone on its line, trimming around
   a tag) as a small additive marker; today output is literal and nothing is trimmed.
 
+## Dynamic paths in the router and URL helpers
+- The route table has exact static paths only. Route parameters (`/agents/:id`) need a matcher, a
+  precedence rule against static paths, and a way for `weberl_url:router_path/2` to build and verify
+  a link from the parameters (`HANDOFF.md`, decision 8). Until then `router_path` verifies static paths and
+  an app builds dynamic links with `ensure_path` and `component` (unverified).
+
 ## Layouts chosen at runtime
 - Today a view's layout is fixed when the router starts: layout and view are composed at compile time
   into one generated module per view. The user wants templates rendered with a layout chosen at runtime
