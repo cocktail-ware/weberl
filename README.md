@@ -292,8 +292,44 @@ Naming rules:
 - One view per directory. Directories without views produce no routes but may
   contain subdirectories that do.
 - Directory names must be valid URL segments (no whitespace, control chars,
-  `? # \`, and no `:` or `*`, which are reserved for later dynamic/wildcard
-  routes).
+  `? # \`, and no `:` or `*`). A directory named `[name]` is a [route
+  parameter](#route-parameters).
+
+### Route parameters
+
+A segment can be a parameter: `:id` in a declarative path, a directory `[id]` in the filesystem.
+
+```text
+src/views/agents/[id]/agent_view.erl            -> /agents/:id
+src/views/agents/[id]/logs/[day]/log_view.erl   -> /agents/:id/logs/:day
+```
+
+```erlang
+{"/agents/:id", agent_handler}    %% declarative
+```
+
+The handler reads the values with `weberl_request:params(Request)`:
+
+```erlang
+handle(Request) ->
+    #{id := Id} = weberl_request:params(Request),     %% <<"7">> for /agents/7
+    ...
+```
+
+- A parameter name is `[a-z][a-z0-9_]*` and appears once per route. A parameter is **exactly one
+  non-empty segment**: `/agents/:id` matches `/agents/7`, not `/agents`, `/agents/` or `/agents/7/x`.
+  There are no wildcards yet.
+- Values are binaries, **percent-decoded once** after the path has been matched on its raw segments, so
+  `/agents/a%2Fb` gives `<<"a/b">>` and cannot become two segments. `%` is valid in a URL only as an
+  escape (`%HH`, a literal one is `%25`): a matched parameter with a bad escape (`%zz`, a lone `%`) or
+  whose decoded value is not UTF-8 is answered with `400 Bad Request` without calling the handler.
+  `weberl_request:path/1` stays the raw path.
+- A static route wins over a parameter (`/agents/new` before `/agents/:id`), and otherwise the first
+  segment where two routes differ decides, a static one before a parameter (`/a/b/:y` before
+  `/a/:x/c`). Two routes of the same shape with different names (`/a/:x`, `/a/:y`) are a conflict
+  (`{duplicate_routes, Origin, [{"/a/:", _}]}`, the shape written with `:` for each parameter). A
+  filesystem route hides a declarative one of the same shape, as for static paths.
+- Links to such routes are checked like any other (see [Links](#links)).
 
 Discovery reads source files with `io:scan_erl_form/3` and
 `erl_parse:parse_form/1`: up to `-module`, then the remaining attributes up to the
@@ -412,7 +448,7 @@ transport connection. There is no per-route process.
 | `path/1` | requested path as a string (raw: not percent-decoded or normalized) |
 | `headers/1`, `header/2` | `[{LowercaseName, Value}]` binaries; `header/2` is case-insensitive, `{ok, V} \| error` |
 | `query/1`, `query_params/1` | raw query binary; parsed `{ok, [{Name, Value \| true}]} \| {error, invalid_query}` |
-| `params/1` | route parameters, `#{}` for static routes |
+| `params/1` | route parameters (`#{id => <<"7">>}` for `/agents/:id`, percent-decoded), `#{}` for static routes |
 | `peer/1` | `{Address, Port}` or `undefined` |
 | `meta/1` | transport metadata map (Roadrunner: `adapter`, `listener`, `scheme`, `version`, `request_id`) |
 | `read_body/1` | `{ok, binary()} \| {error, Reason}` |
@@ -716,18 +752,24 @@ producing a dead link. The path has to be written out: `router_path(@target)` is
 part, put `{{ }}` placeholders in the string:
 
 ```html
-<a href="{{ weberl_url:router_path("/docs/{{ @page }}") }}">docs</a>
+<a href="{{ weberl_url:router_path("/agents/{{ @id }}") }}">agent</a>   <!-- route /agents/:id -->
+<a href="{{ weberl_url:router_path("/docs/{{ @page }}") }}">docs</a>    <!-- static /docs/intro, /docs/api -->
+<a href="{{ weberl_url:router_path("/agents/7") }}">agent 7</a>         <!-- a literal id matches /agents/:id -->
 ```
 
 Each placeholder is **exactly one path segment**: its value is percent-encoded (a value with a `/` cannot
 turn into two segments), must not be empty, and the built path has to be a route. At compile time the
-pattern has to match the shape of at least one route (`{unknown_route, Pattern}` otherwise), and because
-the value is not known yet it gives a warning (`{dynamic_route_segment, Pattern}`, logged with file and
-line when the router starts); `router_path("/docs/{{ @page }}", #{no_warn => true})` silences it. A route
-with several dynamic segments needs one placeholder each. The options map takes `no_warn`, `query` (a map or
-pairs, appended after `?`) and `router` (the name of another running router to check against). The routes a
-link can match are compiled into the template, so rendering needs no router and works from any process (a
-request, a live page, an agent's task). Routes are static paths today; dynamic routes are on the roadmap.
+link is matched against the routes by segments (`{unknown_route, Pattern}` when none has its shape): a
+literal segment matches the same static segment or a [route parameter](#route-parameters), a placeholder
+matches a parameter or a static segment whose text fits. Where a placeholder stands at a **parameter** of the
+route (`/agents/{{ @id }}` against `/agents/:id`) any value is a route, so there is nothing to warn about.
+Where it stands at a **static** segment (`/docs/{{ @page }}` against `/docs/intro`) only some values are
+routes, which gives a warning (`{dynamic_route_segment, Pattern}`, logged with file and line when the
+router starts); `router_path("/docs/{{ @page }}", #{no_warn => true})` silences it. A route with several
+dynamic segments needs one placeholder each. The options map takes `no_warn`, `query` (a map or
+pairs, appended after `?`) and `router` (the name of another running router to check against). The route
+patterns a link can match are compiled into the template, so rendering needs no router and works from any
+process (a request, a live page, an agent's task).
 
 `weberl_template:compile_source/5` and `compile_file/4` take `#{routes => Table}` for this; without it
 (unit tests of a single template) the route check at compile time is skipped, `weberl_template:warnings/1`
@@ -1418,14 +1460,13 @@ See `ROADMAP.md` for the running list. Notable points:
 - Stopping a router does not close connections that are already open.
 - A router process killed without cleanup leaves its listener serving until the
   same router name is started again.
-- No dynamic or wildcard routes, middleware execution, authentication,
+- No wildcard routes (a parameter is one segment), middleware execution, authentication,
   nested layouts or components in templates, blocks (`if`, `case`, `for`) inside tags and attributes,
   and no hot reloading.
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.
-- Links to routes are verified for static paths only; `srcset`, `data`, `ping` and the other
-  non-URL-helper attributes still reject interpolation.
+- `srcset`, `data`, `ping` and the other attributes without a URL helper still reject interpolation.
 - Request `path/1` is the raw path; a decoded variant is future work.
 
 ## Project documents
@@ -1434,7 +1475,7 @@ See `ROADMAP.md` for the running list. Notable points:
 |---|---|
 | `README.md` | this document: usage, architecture, limitations |
 | `MILESTONE_2.md` | the Milestone 2 specification (kept in sync with what was built) |
-| `TEMPLATE_BLOCKS.md` | the template block language (`{{ Expr }}`, `if`, `case`, `for`): semantics, generated code, hooks, reuse by another library |
+| `TEMPLATE_BLOCKS.md` | the template block language (`{{ Expr }}`, `if`, `case`, `for`): semantics, generated code, hooks |
 | `ROADMAP.md` | deferred work and things to revisit |
 | `E2E_ROADMAP.md` | plan for the future browser (end-to-end) test suite |
 | `PROCESSES.md` | convention for long-running processes (`gen_statem`), followed by `weberl_router_server` |

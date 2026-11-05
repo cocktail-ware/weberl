@@ -207,14 +207,16 @@ route_parts(Fun, Route, OptsForm, Opts, Parsed, #{line := Line} = C) ->
             throw({url_error, Line, {not_a_path, Route}})
     end,
     Dynamic = [Seg || {seg, Seg} <- Parts],
-    Known = case table(Opts, C) of
-                none -> none;
-                Table -> matching(Parts, Dynamic, Route, Table, Line)
-            end,
-    Warnings = case {Dynamic, maps:get(no_warn, Opts, false)} of
-                   {[], _} -> [];
-                   {_, true} -> [];
-                   {_, false} -> [{dynamic_route_segment, Route}]
+    {Known, Covered} = case table(Opts, C) of
+                           none -> {none, false};
+                           Table -> matching(Parts, Route, Table, Line)
+                       end,
+    %% a placeholder where the route has a parameter takes any value: nothing to warn about
+    Warnings = case {Dynamic, Covered, maps:get(no_warn, Opts, false)} of
+                   {[], _, _} -> [];
+                   {_, true, _} -> [];
+                   {_, _, true} -> [];
+                   {_, _, false} -> [{dynamic_route_segment, Route}]
                end,
     PartForms = [part_form(P, Line) || P <- Parts],
     List = lists:foldr(fun(F, Acc) -> {cons, Line, F, Acc} end, {nil, Line}, PartForms),
@@ -238,18 +240,66 @@ known_fun(router_url) -> router_url_known.
 call(Fun, Args, Line) ->
     {call, Line, {remote, Line, {atom, Line, weberl_url}, {atom, Line, Fun}}, Args}.
 
-%% The routes of the table the call can match, as a map for the render-time lookup: the
-%% one a literal route names, or every route with the shape of a pattern. None is an error.
-matching(Parts, [], Route, Table, Line) ->
-    [{lit, Bin}] = Parts,
-    case weberl_table:lookup(unicode:characters_to_list(Bin), Table) of
-        {ok, R} -> #{unicode:characters_to_binary(weberl_route:path(R)) => []};
-        {error, not_found} -> throw({url_error, Line, {unknown_route, Route}})
-    end;
-matching(Parts, _Dynamic, Route, Table, Line) ->
-    case [unicode:characters_to_binary(P) || P <- route_paths(Table), shape_matches(Parts, P)] of
-        [] -> throw({url_error, Line, {unknown_route, Route}});
-        Paths -> maps:from_list([{P, []} || P <- Paths])
+%% The routes of the table the link can match, as patterns for the render-time check, and
+%% whether some route covers every placeholder with a parameter (so any value is a route).
+%% None matching is an error. A link is read by segments: a literal segment matches the same
+%% static segment or a parameter; a placeholder matches a parameter, or a static segment
+%% whose text fits (the link is then right for some values only).
+matching(Parts, Route, Table, Line) ->
+    Segments = link_segments(Parts),
+    Patterns = [weberl_route:pattern_parts(weberl_route:path(R)) || R <- weberl_table:routes(Table)],
+    case [P || P <- Patterns, length(P) =:= length(Segments), all_fit(Segments, P)] of
+        [] ->
+            throw({url_error, Line, {unknown_route, Route}});
+        Matching ->
+            {Matching, lists:any(fun(P) -> covers(Segments, P) end, Matching)}
+    end.
+
+%% The link as segments, each a list of literal pieces and placeholders; empty segments
+%% (repeated and trailing slashes) are dropped, as when a path is read.
+link_segments(Parts) ->
+    {Done, Current} = lists:foldl(fun add_part/2, {[], []}, Parts),
+    [S || S <- lists:reverse([lists:reverse(Current) | Done]), S =/= []].
+
+add_part({seg, _} = Seg, {Done, Current}) ->
+    {Done, [Seg | Current]};
+add_part({lit, Bin}, Acc) ->
+    [First | Rest] = binary:split(Bin, <<"/">>, [global]),
+    lists:foldl(fun(Piece, {Done, Current}) -> add_piece(Piece, {[lists:reverse(Current) | Done], []}) end,
+                add_piece(First, Acc), Rest).
+
+add_piece(<<>>, Acc) -> Acc;
+add_piece(Piece, {Done, Current}) -> {Done, [{lit, Piece} | Current]}.
+
+all_fit([], []) -> true;
+all_fit([Segment | Segments], [Pattern | Patterns]) -> fits(Segment, Pattern) andalso all_fit(Segments, Patterns).
+
+fits(_Segment, {param, _}) ->
+    true;
+fits(Pieces, Static) when is_binary(Static) ->
+    case [P || {seg, _} = P <- Pieces] of
+        [] -> iolist_to_binary([B || {lit, B} <- Pieces]) =:= Static;
+        _ -> piece_regex(Pieces, Static)
+    end.
+
+%% A placeholder inside a static segment: the segment's text has to fit around it.
+piece_regex(Pieces, Static) ->
+    Regex = iolist_to_binary(["^", [piece(P) || P <- Pieces], "$"]),
+    case re:compile(Regex, [unicode]) of
+        {ok, MP} -> re:run(Static, MP, [{capture, none}]) =:= match;
+        {error, _} -> false
+    end.
+
+piece({lit, Bin}) -> re:replace(Bin, <<"[\\\\.^$*+?()\\[\\]{}|]">>, <<"\\\\&">>, [global, {return, binary}]);
+piece({seg, _}) -> <<".+">>.
+
+%% Every segment with a placeholder stands where the route has a parameter.
+covers([], []) -> true;
+covers([Segment | Segments], [Pattern | Patterns]) ->
+    HasPlaceholder = lists:any(fun({seg, _}) -> true; (_) -> false end, Segment),
+    case {HasPlaceholder, Pattern} of
+        {true, Static} when is_binary(Static) -> false;
+        _ -> covers(Segments, Patterns)
     end.
 
 %% The literal options of the call: `no_warn' and `router'. A key that is not an option is
@@ -311,30 +361,6 @@ split(Bin, Line, Acc) ->
                 {error, Reason} ->
                     throw({url_error, Line, {bad_placeholder, Reason}})
             end
-    end.
-
-route_paths(Table) ->
-    [weberl_route:path(R) || R <- weberl_table:routes(Table)].
-
-%% Does a route path have the shape of the parts? A placeholder is one non-empty segment
-%% (or the non-empty text between two literals inside a segment).
-shape_matches(Parts, Path) ->
-    Regex = iolist_to_binary(["^", [shape_regex(P) || P <- trim_slash(Parts)], "$"]),
-    case re:compile(Regex, [unicode]) of
-        {ok, MP} -> re:run(Path, MP, [{capture, none}]) =:= match;
-        {error, _} -> false
-    end.
-
-shape_regex({lit, Bin}) -> re:replace(Bin, <<"[\\\\.^$*+?()\\[\\]{}|]">>, <<"\\\\&">>, [global, {return, binary}]);
-shape_regex({seg, _}) -> <<"[^/]+">>.
-
-%% Routes have no trailing slash (the root is `/'): neither does the pattern.
-trim_slash([{lit, <<"/">>}]) ->
-    [{lit, <<"/">>}];
-trim_slash(Parts) ->
-    case lists:last(Parts) of
-        {lit, Bin} -> lists:droplast(Parts) ++ [{lit, string:trim(Bin, trailing, "/")}];
-        _ -> Parts
     end.
 
 %% ---------------------------------------------------------------------

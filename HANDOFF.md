@@ -340,6 +340,47 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `{unterminated_string, Line}`, `{unbalanced_brace, Line}`. The "Known limits" entry in `TEMPLATE_BLOCKS.md`
   and the README sentence about `}}` are rewritten when this is built. Tests: braces in strings, nested
   maps/tuples without a space, `$}` and `$"`, unterminated string, unbalanced brace, raw with a map.
+- **Decision 11 (dynamic router paths, syntax; user, 2026-11-05).** Declarative: `{"/agents/:id", Handler}`.
+  Filesystem: a directory named `[id]` is the parameter segment (`agents/[id]/agent_view.erl` is
+  `/agents/:id`); `_id` and `:id` directories were rejected (clash with real `_` directories; `:` is illegal on
+  Windows). Rules: (1) a parameter name is `[a-z][a-z0-9_]*` and may appear once per route; (2) a parameter is
+  exactly one non-empty segment (`/agents/:id` matches `/agents/7`, not `/agents/` or `/agents/7/x`);
+  wildcards (`*rest`) are out of scope; (3) `weberl_request:params/1` is `#{id => <<"7">>}`, binary values
+  percent-decoded once after matching on the raw segments (so `%2F` stays inside one value); `path/1` stays
+  the raw path; (4) static beats dynamic segment by segment (`/agents/new` over `/agents/:id`); two routes of
+  the same shape with different parameter names (`/a/:x`, `/a/:y`) are a conflict error at start; filesystem
+  versus declarative priority is unchanged; (5) params are part of the request the handler (and `topics/2`)
+  sees; nothing else about live pages changes. Still to decide: matching structure and router verification of
+  links against parameter segments (decision 12), request params decoding errors.
+- **Decision 12 (dynamic paths: matching and link verification; user, 2026-11-05).** `weberl_table` keeps the
+  exact-path map for static routes and adds a segment trie for dynamic ones (static child first, then the
+  parameter child, with backtracking); `weberl_table:match(Path, Table) -> {ok, Route, Params} | {error,
+  not_found}`; `lookup/2` stays static-only. Conflicts are found on the shape (parameter names replaced by a
+  marker). Link verification uses the same structure: a literal link (`router_path("/agents/7")`) must match a
+  route (static or dynamic); a placeholder aligned with a parameter segment is verified with **no warning**,
+  one aligned with a static segment still warns (`dynamic_route_segment`); no route of the pattern's shape is
+  `{unknown_route, Pattern}`. A call embeds the route patterns it can match (not paths) and the render-time
+  check matches the built path against them; an empty value stays `{empty_segment, V}`. A literal `:id` in a
+  link is plain text. Percent escapes: `%` is valid in a URL only as `%HH`; a matched parameter with a bad
+  escape (`%zz`, a lone `%`) or that decodes to invalid UTF-8 makes the request a `400 Bad Request`. The named
+  form `router_path("/agents/:id", #{params => #{id => @id}})` is a possible later addition (user: good future
+  improvement, not now).
+- **Dynamic paths built (2026-11-05, decisions 11 and 12).** `weberl_route:normalize_pattern/1`,
+  `pattern_parts/1`, `is_dynamic/1`, `shape/1`, `request_segments/1`, `decode_segment/1`; `weberl_decl` takes
+  `:name`, `weberl_fs` turns a `[name]` directory into `:name` (a bad name is `{invalid_route_path, File,
+  {invalid_parameter, ":Id"}}`); `weberl_table:match/2` (static index first, then the trie; `lookup/2`
+  static-only); conflicts and shadowing by shape (`{duplicate_routes, Origin, [{"/a/:", _}]}`);
+  `weberl_dispatch` decodes the params (400 `Bad Request` on a bad escape or invalid UTF-8, logged as
+  `invalid_path_parameter`) and sets them with the new `weberl_request:with_params/2`. Link verification
+  (`weberl_template_urls`) matches a link by segments against the route patterns (`matching/4`, `covers/2`):
+  a placeholder at a parameter needs no warning, at a static segment it warns; the call embeds the matching
+  route patterns (`router_path_known/3` takes `[[binary() | {param, atom()}]]` now, not a map). Tests:
+  `weberl_dynamic_paths_tests` (30: patterns, escapes, precedence and backtracking, conflicts, shadowing,
+  `[id]` directories, declarative `:id`, dispatch params and 400, links), `weberl_views_tests`
+  (`parameter_directory`: HTTP, template, verified link); 946 eunit tests; browser suite not re-run. README
+  "Route parameters" written; ROADMAP keeps wildcards, the named link form, typed parameters and links by
+  route name. Next in the user's order: multipart forms, then blocks inside tags and attributes, then runtime
+  layouts.
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)

@@ -24,22 +24,45 @@
 -export([dispatch/2]).
 
 -spec dispatch(weberl_request:t(), weberl_table:t()) -> weberl_response:t().
-dispatch(Request, Table) ->
-    case weberl_table:lookup(weberl_request:path(Request), Table) of
-        {ok, Route} ->
-            case weberl_csrf:check(weberl_route:csrf(Route), Request) of
-                ok ->
-                    with_session(Request, fun() -> serve(weberl_route:live(Route), Route, Request) end);
-                {error, Reason} ->
-                    ?LOG_WARNING(#{what => csrf_rejected, reason => Reason,
-                                   method => weberl_request:method(Request),
-                                   path => weberl_request:path(Request),
+dispatch(Request0, Table) ->
+    case weberl_table:match(weberl_request:path(Request0), Table) of
+        {ok, Route, Raw} ->
+            case decode_params(Raw) of
+                {ok, Params} ->
+                    Request = weberl_request:with_params(Request0, Params),
+                    routed(Route, Request);
+                error ->
+                    %% a `%' that is not an escape, or a value that is not UTF-8
+                    ?LOG_WARNING(#{what => invalid_path_parameter,
+                                   path => weberl_request:path(Request0),
                                    handler => weberl_route:handler(Route)}),
-                    weberl_response:text(403, <<"Forbidden">>)
+                    weberl_response:text(400, <<"Bad Request">>)
             end;
         {error, not_found} ->
             weberl_response:text(404, <<"Not Found">>)
     end.
+
+routed(Route, Request) ->
+    case weberl_csrf:check(weberl_route:csrf(Route), Request) of
+        ok ->
+            with_session(Request, fun() -> serve(weberl_route:live(Route), Route, Request) end);
+        {error, Reason} ->
+            ?LOG_WARNING(#{what => csrf_rejected, reason => Reason,
+                           method => weberl_request:method(Request),
+                           path => weberl_request:path(Request),
+                           handler => weberl_route:handler(Route)}),
+            weberl_response:text(403, <<"Forbidden">>)
+    end.
+
+%% Percent-decode each parameter value (once), all or nothing.
+decode_params(Raw) ->
+    maps:fold(fun(_Name, _Value, error) -> error;
+                 (Name, Value, {ok, Acc}) ->
+                      case weberl_route:decode_segment(Value) of
+                          {ok, Decoded} -> {ok, Acc#{Name => Decoded}};
+                          error -> error
+                      end
+              end, {ok, #{}}, Raw).
 
 %% The request is available to the session functions of `weberl_response' while
 %% the handler runs; afterwards the session the response carries becomes its cookie.

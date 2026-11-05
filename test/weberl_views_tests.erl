@@ -80,6 +80,7 @@ e2e_test_() ->
       {"invalid template fails startup, nothing left", fun invalid_template/0},
       {"links are checked against the router's routes", fun links_to_routes/0},
       {"a link to a route that does not exist fails startup", fun link_to_unknown_route/0},
+      {"a [id] directory is a route parameter, with a template and a verified link", fun parameter_directory/0},
       {"template is not re-read per request", fun not_reread/0},
       {"restart picks up an edited template", fun restart_recompiles/0}]}.
 
@@ -230,6 +231,40 @@ links_to_routes() ->
                                     "<a href=\"/docs/intro\">docs</a>"
                                     "<a href=\"/items/a%20b%2Fc\">item</a>">>},
                          get(Name, "/"))
+        after
+            weberl:stop(Name)
+        end
+    end).
+
+%% `agents/[id]/' is `/agents/:id': the handler reads the parameter, the page links to the
+%% same route with a placeholder (verified when the router starts, without a warning).
+parameter_directory() ->
+    with_tmp(fun(Dir) ->
+        Home = view_name("phome"),
+        Agent = view_name("pagent"),
+        write_tree(Dir,
+                   [{Home ++ ".erl", view_src(Home, "#{id => <<\"a b/c\">>}")},
+                    {Home ++ ".weberl",
+                     <<"<a href=\"{{ weberl_url:router_path(\"/agents/{{ @id }}\") }}\">agent</a>">>},
+                    {"agents/[id]/" ++ Agent ++ ".erl",
+                     iolist_to_binary(
+                       io_lib:format("-module(~s).~n-export([handle/1]).~n"
+                                     "handle(Req) ->~n"
+                                     "    weberl_response:html(200, weberl_template:render(?MODULE, "
+                                     "#{id => maps:get(id, weberl_request:params(Req))})).~n", [Agent]))},
+                    {"agents/[id]/" ++ Agent ++ ".weberl", <<"<h1>agent {{ @id }}</h1>">>}]),
+        [compile_load(filename:join(Dir, F)) || F <- [Home ++ ".erl", "agents/[id]/" ++ Agent ++ ".erl"]],
+        Name = router_name(),
+        {ok, _} = weberl:start_link(Name, fs_router(Dir), listener()),
+        try
+            ?assertMatch({200, _, <<"<a href=\"/agents/a%20b%2Fc\">agent</a>">>}, get(Name, "/")),
+            ?assertMatch({200, _, <<"<h1>agent 7</h1>">>}, get(Name, "/agents/7")),
+            %% decoded once, then escaped by the template
+            ?assertMatch({200, _, <<"<h1>agent a b</h1>">>}, get(Name, "/agents/a%20b")),
+            ?assertMatch({200, _, <<"<h1>agent a/b</h1>">>}, get(Name, "/agents/a%2Fb")),
+            ?assertMatch({200, _, <<"<h1>agent &lt;b&gt;</h1>">>}, get(Name, "/agents/%3Cb%3E")),
+            ?assertMatch({404, _, _}, get(Name, "/agents")),
+            ?assertMatch({404, _, _}, get(Name, "/agents/7/x"))
         after
             weberl:stop(Name)
         end

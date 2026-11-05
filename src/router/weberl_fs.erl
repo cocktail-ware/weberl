@@ -61,6 +61,16 @@ walk_entries([Name | Rest], Dir, Segs, Prefix, Acc) ->
             {error, {cannot_read_file_info, Full, Reason}}
     end.
 
+%% A directory `[id]' is the parameter segment `:id' (HANDOFF.md, decision 11). A directory
+%% that really contains `:' is not turned into one: `normalize_pattern' refuses it.
+segment("[" ++ Rest = Name) ->
+    case lists:last(Name) of
+        $] -> [$: | lists:droplast(Rest)];
+        _ -> Name
+    end;
+segment(Name) ->
+    Name.
+
 is_view_file(Name) ->
     lists:suffix(?SUFFIX, Name) andalso Name =/= ?SUFFIX.
 
@@ -70,8 +80,8 @@ view_route(File, Segs, Prefix) ->
             Expected = filename:basename(File, ".erl"),
             case atom_to_list(Mod) of
                 Expected ->
-                    UrlPath = Prefix ++ "/" ++ lists:append(lists:join("/", Segs)),
-                    case weberl_route:normalize_path(UrlPath) of
+                    UrlPath = Prefix ++ "/" ++ lists:append(lists:join("/", [segment(S) || S <- Segs])),
+                    case weberl_route:normalize_pattern(UrlPath) of
                         {ok, Path} ->
                             {ok, weberl_route:new(Path, Mod, filesystem, File, Opts)};
                         {error, Reason} ->

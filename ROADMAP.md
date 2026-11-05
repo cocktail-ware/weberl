@@ -41,10 +41,11 @@ specification; kept here so they don't clutter active work.
   a tag) as a small additive marker; today output is literal and nothing is trimmed.
 
 ## Dynamic paths in the router and URL helpers
-- The route table has exact static paths only. Route parameters (`/agents/:id`) need a matcher, a
-  precedence rule against static paths, and a way for `weberl_url:router_path/2` to build and verify
-  a link from the parameters (`HANDOFF.md`, decision 8). Until then `router_path` verifies static paths and
-  an app builds dynamic links with `ensure_path` and `component` (unverified).
+- Route parameters (`/agents/:id`, a `[id]` directory) are built (`HANDOFF.md`, decisions 11 and 12), and
+  `router_path` verifies links against them. Still open: wildcard segments (`*rest`, several segments), the
+  named link form `router_path("/agents/:id", #{params => #{id => @id}})` (checks the parameter names of a
+  literal map at compile time), typed parameters (`:id` that must be an integer), and a way to build a link
+  from a route name instead of a path.
 
 ## Layouts chosen at runtime
 - Today a view's layout is fixed when the router starts: layout and view are composed at compile time

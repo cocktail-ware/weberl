@@ -56,7 +56,7 @@ normalize_entries(M, Other, _Acc) ->
 route(M, Entry, _Path, Handler, _Opts, _Rest, _Acc) when not is_atom(Handler) ->
     {error, {invalid_route, M, Entry, {invalid_handler, Handler}}};
 route(M, Entry, Path, Handler, Opts, Rest, Acc) ->
-    case weberl_route:normalize_path(Path) of
+    case weberl_route:normalize_pattern(Path) of
         {ok, P} ->
             case weberl_route:check_opts(Opts) of
                 {ok, Opts1} ->

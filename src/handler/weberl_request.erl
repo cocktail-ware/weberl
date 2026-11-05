@@ -8,7 +8,8 @@
 %%   <li>`headers': `[{LowercaseName, Value}]' binaries, in arrival order.</li>
 %%   <li>`query': raw query string (binary, without `?'). Parse on demand with
 %%       {@link query_params/1}.</li>
-%%   <li>`params': route parameters. Always `#{}' for static routes.</li>
+%%   <li>`params': route parameters, `#{id => <<"7">>}' for a route `/agents/:id' (values
+%%       percent-decoded; `#{}' for a static route).</li>
 %%   <li>`peer': `{Address, Port}' or `undefined'.</li>
 %%   <li>`meta': free-form map for transport metadata.</li>
 %% </ul>
@@ -24,7 +25,7 @@
 -export([new/1,
          method/1, path/1, headers/1, header/2, query/1, query_params/1,
          params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1, session/1, session_get/2,
-         page/1, with_page/2]).
+         page/1, with_page/2, with_params/2]).
 -export_type([t/0]).
 -export_record([request]).
 
@@ -149,6 +150,11 @@ form(#request{} = R) ->
 %% `undefined'. Pass it to whatever pushes updates with `weberl_live:push/3'.
 -spec page(t()) -> undefined | binary().
 page(#request{page = P}) -> P.
+
+%% @doc The request with its route parameters (`#{id => <<"7">>}'); dispatch sets them
+%% from the route that matched.
+-spec with_params(t(), #{atom() => binary()}) -> t().
+with_params(#request{} = R, Params) when is_map(Params) -> R#request{params = Params}.
 
 -spec with_page(t(), binary()) -> t().
 with_page(#request{} = R, PageId) when is_binary(PageId) -> R#request{page = PageId}.

@@ -157,31 +157,41 @@ router_url_parts(Parts, Opts0) ->
 
 %% @doc What the template compiler makes of `router_path(...)' when the template is compiled
 %% with the route table: the parts as for {@link router_path_parts/2} and `Known', the
-%% routes (a map `Path => []') the call can match, which the compiler worked out. The
-%% built path must be one of them, else `{unknown_route, Path}'; no router is needed when
-%% rendering, in whichever process that happens (a request, a live session, a task of the
-%% application).
--spec router_path_known([{lit, binary()} | {seg, term()}], #{binary() => term()}, map()) -> tagged().
+%% patterns (`weberl_route:pattern_parts/1') of the routes the call can match, which the
+%% compiler worked out. The built path must match one of them, else `{unknown_route, Path}';
+%% no router is needed when rendering, in whichever process that happens (a request, a
+%% live session, a task of the application).
+-spec router_path_known([{lit, binary()} | {seg, term()}], [[binary() | {param, atom()}]], map()) -> tagged().
 router_path_known(Parts, Known, Opts0) ->
     Opts = check_opts(Opts0),
     tag(router_path, with_query(known_route(join_parts(Parts), Known), Opts)).
 
 %% @doc Like {@link router_path_known/3}, as {@link router_url/2}.
--spec router_url_known([{lit, binary()} | {seg, term()}], #{binary() => term()}, map()) -> tagged().
+-spec router_url_known([{lit, binary()} | {seg, term()}], [[binary() | {param, atom()}]], map()) -> tagged().
 router_url_known(Parts, Known, Opts0) ->
     Opts = check_opts(Opts0),
     Route = known_route(join_parts(Parts), Known),
     tag(router_url, with_query(<<(public_url())/binary, Route/binary>>, Opts)).
 
+%% `Known' is a list of route patterns (`weberl_route:pattern_parts/1'): the path has to match
+%% one. The result is the path normalized (repeated and trailing slashes dropped).
 known_route(Path, Known) ->
-    case weberl_route:normalize_path(unicode:characters_to_list(Path)) of
-        {ok, Normal} ->
-            Bin = unicode:characters_to_binary(Normal),
-            maps:is_key(Bin, Known) orelse fail({unknown_route, Path}),
-            Bin;
-        {error, _} ->
+    case weberl_route:request_segments(unicode:characters_to_list(Path)) of
+        {ok, Segments} ->
+            lists:any(fun(Pattern) -> matches(Pattern, Segments) end, Known) orelse fail({unknown_route, Path}),
+            joined(Segments);
+        error ->
             fail({unknown_route, Path})
     end.
+
+%% A parameter matches one segment (never empty); a static segment only itself.
+matches([], []) -> true;
+matches([{param, _} | Pattern], [_ | Segments]) -> matches(Pattern, Segments);
+matches([Segment | Pattern], [Segment | Segments]) when is_binary(Segment) -> matches(Pattern, Segments);
+matches(_, _) -> false.
+
+joined([]) -> <<"/">>;
+joined(Segments) -> iolist_to_binary([["/", S] || S <- Segments]).
 
 join_parts(Parts) -> iolist_to_binary([part(P) || P <- Parts]).
 
@@ -311,9 +321,12 @@ route(Path, Opts) ->
     Bin = text(Path),
     local(Bin) orelse fail({not_a_path, Path}),
     Table = table(Opts),
-    case weberl_table:lookup(unicode:characters_to_list(Bin), Table) of
-        {ok, Route} -> unicode:characters_to_binary(weberl_route:path(Route));
-        {error, not_found} -> fail({unknown_route, Bin})
+    case weberl_table:match(unicode:characters_to_list(Bin), Table) of
+        {ok, _Route, _Params} ->
+            {ok, Segments} = weberl_route:request_segments(unicode:characters_to_list(Bin)),
+            joined(Segments);
+        {error, not_found} ->
+            fail({unknown_route, Bin})
     end.
 
 table(Opts) ->
