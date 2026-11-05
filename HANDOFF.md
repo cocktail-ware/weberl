@@ -73,11 +73,17 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `form/1` in `weberl_adapter`; Roadrunner keeps its request in `meta.raw`), Weberl builds
   (cookies, redirects, repeated headers: pure, validated, one serializer). **1a done**:
   `weberl_request:cookies/1`, `cookie/2`, `form/1` (urlencoded only), tests in
-  `test/weberl_request_helpers_tests.erl` (real HTTP login-style POST). **Still to do in 1**:
-  `weberl_response:add_header/3`, `set_cookie`, `redirect` (design points: redirect target rules,
-  cookie option validation), then CSRF (framework-provided; Arizona uses an Origin check, no token;
-  decide Origin check only vs. plus a double-submit token and a form helper), the Roadrunner check
-  that two `set-cookie` headers reach the wire, then reply in agentic's `WEBERL_FEEDBACK.md`.
+  `test/weberl_request_helpers_tests.erl` (real HTTP login-style POST). **1b done** (user agreed to
+  the defaults): `weberl_response:add_header/3`, `header_values/2`, `set_cookie/3,4`,
+  `delete_cookie/2,3`, `redirect/1,2` (303 default), `weberl_cookie` (validated serializer, defaults
+  `Path=/; HttpOnly; SameSite=Lax`, `secure` off), `weberl_url:local/1`; headers with control chars
+  raise `badarg`; `new/3` keeps repeated headers; fixed `with_header/3` leaving repeats behind. Tests:
+  `test/weberl_response_helpers_tests.erl` (includes a 303 with two set-cookie over Roadrunner).
+  **Multipart**: not supported by `form/1` yet; proposed `weberl_request:multipart/1` through the same
+  adapter callback pattern (parts `#{name, filename, content_type, body}`), user has not decided.
+  **Still to do in 1**: CSRF (framework-provided; Arizona uses an Origin check, no token; proposal:
+  Origin check by default as a router-level step, plus an optional double-submit token and a basic
+  form helper), then reply in agentic's `WEBERL_FEEDBACK.md`.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

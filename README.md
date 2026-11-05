@@ -427,6 +427,32 @@ Convention: **functions take their subject first** (the request or the response)
 `weberl_request` and `weberl_response` alike: `weberl_request:header(Request, Name)`,
 `weberl_response:with_header(Response, Name, Value)`.
 
+#### Repeated headers, cookies and redirects
+
+```erlang
+weberl_response:add_header(Response, "x-a", "1")   % appends; with_header/3 replaces all of that name
+weberl_response:header_values(Response, "set-cookie")      % every value, in order
+
+R = weberl_response:redirect("/home"),             % 303 See Other (after a form POST)
+weberl_response:redirect(301, "/new"),             % 301 | 302 | 303 | 307 | 308
+weberl_response:set_cookie(R, "sid", Sid, #{max_age => 3600, secure => true}),
+weberl_response:delete_cookie(R, "sid")            % empty value, Max-Age=0 (same path/domain as set)
+```
+
+`set_cookie/3,4` adds a `set-cookie` header per call (several cookies on one response work), with
+`Path=/; HttpOnly; SameSite=Lax` unless the options say otherwise (`path`, `domain`, `max_age`,
+`http_only`, `secure`, `same_site`). `secure` is off by default because Weberl cannot know the site is
+served over HTTPS: set it in production. Names, values and attributes are checked against RFC 6265 and an
+unsafe one raises (`{invalid_cookie_name | invalid_cookie_value | invalid_cookie_attribute |
+invalid_cookie_option, _}`), so a `;` or a line break from user input cannot add attributes or headers;
+encode other values yourself (base64url, percent-encoding). `same_site => none` requires `secure => true`.
+Header names and values with control characters raise `badarg` everywhere (`new/3`, `with_header/3`,
+`add_header/3`, `redirect/2`).
+
+`redirect` points wherever you say. When the target comes from the client (`?next=/settings`), check it
+with `weberl_url:local/1` first (true only for a path on this site: one leading `/`, not `//` or `/\`, no
+control characters) and fall back to a fixed page.
+
 ### Dispatch, errors and metadata
 
 `weberl_dispatch:dispatch(Request, Table)` returns a response and never raises:
