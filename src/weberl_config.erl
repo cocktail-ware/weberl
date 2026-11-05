@@ -6,7 +6,7 @@
 %% '''
 -module(weberl_config).
 
--export([validate/1, filesystem/1, modules/1, root/1, prefix/1,
+-export([validate/1, filesystem/1, modules/1, layouts/1, root/1, prefix/1,
          validate_listener/1, listener_adapter/1, listener_ip/1,
          listener_port/1, listener_options/1, listener_static/1]).
 
@@ -17,7 +17,8 @@
 
 -record #router{
     filesystem = [] :: [filesystem_router],
-    modules = [] :: [module()]
+    modules = [] :: [module()],
+    layouts = [] :: [string()]
 }.
 
 %% Transport listener. `adapter' is a module implementing `weberl_adapter';
@@ -42,11 +43,11 @@
 %% @doc Validate a `router' configuration. On success the returned record has
 %% normalized filesystem prefixes.
 -spec validate(term()) -> {ok, #router{}} | {error, term()}.
-validate(#router{filesystem = Fs, modules = Ms}) ->
+validate(#router{filesystem = Fs, modules = Ms, layouts = Ls}) ->
     case validate_filesystem(Fs, 1, []) of
         {ok, Fs1} ->
             case validate_modules(Ms, []) of
-                ok -> {ok, #router{filesystem = Fs1, modules = Ms}};
+                ok -> validate_layouts(Ls, Fs1, Ms);
                 {error, _} = Error -> Error
             end;
         {error, _} = Error ->
@@ -104,6 +105,10 @@ filesystem(#router{filesystem = F}) -> F.
 
 -spec modules(#router{}) -> [module()].
 modules(#router{modules = M}) -> M.
+
+%% @doc Directories whose `.weberl' files are layouts (see `weberl_template_layout').
+-spec layouts(#router{}) -> [string()].
+layouts(#router{layouts = L}) -> L.
 
 -spec root(#filesystem_router{}) -> file:filename().
 root(#filesystem_router{root = R}) -> R.
@@ -259,6 +264,14 @@ validate_filesystem([Other | _], I, _Acc) ->
     {error, {invalid_config, {filesystem, I, {not_a_filesystem_router, Other}}}};
 validate_filesystem(Other, _I, _Acc) ->
     {error, {invalid_config, {filesystem_not_a_list, Other}}}.
+
+validate_layouts(Ls, Fs, Ms) when is_list(Ls) ->
+    case [L || L <- Ls, validate_root(L) =/= ok] of
+        [] -> {ok, #router{filesystem = Fs, modules = Ms, layouts = Ls}};
+        [Bad | _] -> {error, {invalid_config, {layouts, {invalid_directory, Bad}}}}
+    end;
+validate_layouts(Other, _Fs, _Ms) ->
+    {error, {invalid_config, {layouts_not_a_list, Other}}}.
 
 validate_root(Root) when is_list(Root), Root =/= [] ->
     case io_lib:printable_unicode_list(Root) of

@@ -13,7 +13,8 @@
 %%       `{: region name [tag=element] :}'</li>
 %%   <li>`{block_close, Line, region, Name}' for `{: /region name :}'</li>
 %% </ul>
-%% and `\{:' is a literal `{:'. Errors:
+%% and `{content, Line}' for `{: content :}' (where a layout puts the view's
+%% template). `\{:' is a literal `{:'. Errors:
 %% `{error, {syntax_error, File, Line, Reason}}' with Reason
 %% `unterminated_interpolation | unterminated_raw_interpolation |
 %% unterminated_block_tag | {invalid_variable_name, Text} |
@@ -26,7 +27,8 @@
 -type token() :: {text, pos_integer(), binary()}
                | {interp, pos_integer(), escaped | raw, atom()}
                | {block_open, pos_integer(), region, atom(), #{tag => binary()}}
-               | {block_close, pos_integer(), region, atom()}.
+               | {block_close, pos_integer(), region, atom()}
+               | {content, pos_integer()}.
 
 -spec tokenize(binary(), file:filename_all()) ->
     {ok, [token()]} | {error, {syntax_error, file:filename_all(), pos_integer(), term()}}.
@@ -88,6 +90,8 @@ block_token(Content, Line) ->
     case Words of
         [<<"region">>, Name | Options] ->
             {block_open, Line, region, block_name(Name, Content, Line), region_options(Options, Content, Line)};
+        [<<"content">>] ->
+            {content, Line};
         [<<"/region">>, Name] ->
             {block_close, Line, region, block_name(Name, Content, Line)};
         _ ->

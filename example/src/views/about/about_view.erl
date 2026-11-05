@@ -2,9 +2,11 @@
 -module(about_view).
 -behaviour(weberl_handler).
 
--export([handle/1]).
+-export([handle/1, weberl_metadata/0]).
+
+weberl_metadata() -> #{layout => main}.
 
 handle(_Request) ->
     weberl_response:html(
       200,
-      weberl_template:render(?MODULE, #{heading => <<"About">>, since => 2026})).
+      weberl_template:render(?MODULE, #{title =><<"About">>, since => 2026})).

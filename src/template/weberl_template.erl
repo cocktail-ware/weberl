@@ -47,11 +47,12 @@
 
 -export([render/2, try_render/2, render_region/3, try_render_region/3, regions/1,
          has_template/1, generated_module/1,
-         compile_source/3, compile_file/2, load/1, compile_and_load_file/2,
+         compile_source/3, compile_source/4, compile_file/2, compile_file/3, parse_layout/1, load/1, compile_and_load_file/2,
          discover/1, associate/2]).
--export_type([compiled/0]).
+-export_type([compiled/0, layout/0]).
 
 -opaque compiled() :: {module(), binary(), file:filename_all()}.
+-type layout() :: weberl_template_layout:layout().
 
 %% ---------------------------------------------------------------------------
 %% Rendering
@@ -126,39 +127,64 @@ generated_module(View) -> weberl_template_compiler:generated_module(View).
 -spec compile_source(module(), binary(), file:filename_all()) ->
     {ok, compiled()} | {error, term()}.
 compile_source(View, Source, File) ->
+    compile_source(View, Source, File, none).
+
+%% @doc Like {@link compile_source/3}, with the template put into a layout
+%% (`parse_layout/1'; `none' for a standalone page). See `weberl_template_layout'.
+-spec compile_source(module(), binary(), file:filename_all(), none | layout()) ->
+    {ok, compiled()} | {error, term()}.
+compile_source(View, Source, File, Layout) ->
     case unicode:characters_to_binary(Source, utf8, utf8) of
         Source ->
-            compile_utf8(View, Source, File);
+            compile_utf8(View, Source, File, Layout);
         _ ->
             {error, {invalid_utf8, File}}
     end.
 
-compile_utf8(View, Source, File) ->
+compile_utf8(View, Source, File, Layout) ->
     case weberl_template_lexer:tokenize(Source, File) of
         {ok, Tokens} ->
             case weberl_template_parser:parse(Tokens, File) of
-                {ok, Ast} -> validate_and_compile(View, Ast, File);
+                {ok, Ast} -> validate_and_compile(View, Ast, File, Layout);
                 {error, _} = Error -> Error
             end;
         {error, _} = Error ->
             Error
     end.
 
-validate_and_compile(View, Ast, File) ->
+validate_and_compile(View, Ast, File, Layout) ->
     case weberl_template_parser:validate(Ast, File) of
         ok ->
-            case weberl_template_compiler:compile(View, Ast, File) of
-                {ok, Mod, Bin} -> {ok, {Mod, Bin, File}};
-                {error, _} = Error -> Error
+            case layout(Layout, Ast, File) of
+                {ok, Full} ->
+                    case weberl_template_compiler:compile(View, Full, File) of
+                        {ok, Mod, Bin} -> {ok, {Mod, Bin, File}};
+                        {error, _} = Error -> Error
+                    end;
+                {error, _} = Error ->
+                    Error
             end;
         {error, _} = Error ->
             Error
     end.
+
+layout(none, Ast, _File) -> {ok, Ast};
+layout(Layout, Ast, File) -> weberl_template_layout:compose(Layout, Ast, File).
+
+%% @doc Read, parse and validate a layout file (once; use the result for every
+%% view that has that layout).
+-spec parse_layout(file:filename_all()) -> {ok, layout()} | {error, term()}.
+parse_layout(File) -> weberl_template_layout:parse(File).
 
 -spec compile_file(module(), file:filename_all()) -> {ok, compiled()} | {error, term()}.
 compile_file(View, File) ->
+    compile_file(View, File, none).
+
+-spec compile_file(module(), file:filename_all(), none | layout()) ->
+    {ok, compiled()} | {error, term()}.
+compile_file(View, File, Layout) ->
     case file:read_file(File) of
-        {ok, Source} -> compile_source(View, Source, File);
+        {ok, Source} -> compile_source(View, Source, File, Layout);
         {error, Posix} -> {error, {read_failed, File, Posix}}
     end.
 

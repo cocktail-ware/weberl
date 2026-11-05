@@ -161,6 +161,7 @@ Listener = #listener{adapter = weberl_roadrunner, ip = {127, 0, 0, 1}, port = 88
 |---|---|---|---|
 | `router` | `filesystem` | `[]` | list of `filesystem_router` |
 | | `modules` | `[]` | declarative router modules |
+| | `layouts` | `[]` | directories of [layout](#layouts) templates |
 | `filesystem_router` | `root` | required | directory string |
 | | `prefix` | `"/"` | URL prefix for the whole root |
 | `listener` | `adapter` | `weberl_roadrunner` | module implementing `weberl_adapter` |
@@ -426,7 +427,7 @@ Invalid arguments raise `badarg`.
 
 A handler may export `weberl_metadata/0` returning a map. Weberl attaches no
 meaning to it yet; it is the extension point for future per-module settings
-(middleware, authentication, layouts). Read it with `weberl_handler:metadata/1`.
+(middleware, authentication). `layout` selects a [layout](#layouts). Read it with `weberl_handler:metadata/1`.
 `weberl_handler:check/1` (used at startup) rejects modules without `handle/1` and
 metadata that is not a map.
 
@@ -457,10 +458,11 @@ beside it is an error at router start (`{unassociated_templates, Files}`).
 | `\{{` | literal `{{` |
 | `{: region name :}` ... `{: /region name :}` | a [region](#regions) |
 | `{: region name tag=tbody :}` | a region wrapped in that element |
+| `{: content :}` | in a [layout](#layouts): where the view's template goes |
 | `\{:` | literal `{:` |
 
 `{{ }}` is for values only; statements use `{: :}`. Names match `[a-z][a-zA-Z0-9_]*` and are looked up as atom keys in the assigns
-map. There are no expressions, conditionals, loops, includes, components, layouts
+map. There are no expressions, conditionals, loops, includes, components
 or filters in this version.
 
 Supported values: UTF-8 binaries, character lists, integers, floats, `true` and
@@ -517,6 +519,50 @@ the variables that region uses; `{unknown_region, View, Region}` is an error lik
 others. Regions are found in the browser by name when an update arrives, so one
 added to the page later by other scripts, or written by hand as
 `<div data-weberl-region="cart">`, can be updated too.
+
+### Layouts
+
+A layout is a template with one `{: content :}` where a view's template goes, so the
+`<html>`, `<head>` and navigation are written once:
+
+```html
+<!-- src/layouts/main.weberl -->
+<!DOCTYPE html>
+<html lang="en">
+<head><title>{{ title }}</title></head>
+<body>
+  <nav>...</nav>
+{: content :}
+</body>
+</html>
+```
+
+The router lists the directories with layouts, and a view picks one in its metadata
+(`weberl_metadata/0`); a view without `layout` stays a standalone page:
+
+```erlang
+#router{filesystem = [...], layouts = ["src/layouts"]}
+
+weberl_metadata() -> #{layout => main}.      %% src/layouts/main.weberl
+```
+
+A layout is named by its file's base name (names must be unique across the directories).
+Layout files are never associated with views, so they may also sit below a filesystem root.
+
+The layout and the view are joined when the view is compiled, so the result is one
+template: the layout's variables are ordinary assigns of the view (`render/2` needs both
+sets), and regions of either file are regions of the view (`render_region/3`, `regions/1`;
+a name may be used once across the two files). `{: content :}` may stand inside a layout
+region, but must be in HTML text (not in a tag, attribute, `<script>` or `<style>`). Each
+file is checked on its own, with its own file name in the errors. Layouts are read when the
+router starts, like all templates.
+
+Errors at router start: `{invalid_layouts, [{Name, Reason}]}` with `{missing_content,
+File}`, `{multiple_content, File, Lines}` or a `syntax_error` (`{content_in_unsupported_context,
+Where}`); `{duplicate_layouts, [{Name, Files}]}`; and in `{invalid_templates, [{View,
+Reason}]}`: `{unknown_layout, Name}`, `layout_without_template` (the metadata asks for a
+layout but the view has no template), `content_outside_layout` (a view or a standalone
+template uses `{: content :}`) and `{duplicate_region, Name, LayoutFile, ViewFile}`.
 
 ### Compile errors
 
@@ -987,8 +1033,8 @@ See `ROADMAP.md` for the running list. Notable points:
 - Stopping a router does not close connections that are already open.
 - A router process killed without cleanup leaves its listener serving until the
   same router name is started again.
-- No dynamic or wildcard routes, middleware execution, authentication, layouts,
-  components, loops or conditionals in templates, and no hot reloading.
+- No dynamic or wildcard routes, middleware execution, authentication,
+  named slots or nested layouts, components, loops or conditionals in templates, and no hot reloading.
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.

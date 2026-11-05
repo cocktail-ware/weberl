@@ -13,7 +13,8 @@ init([]) ->
     ViewsRoot = filename:join(code:lib_dir(example), "src/views"),
     Router = #router{
         filesystem = [#filesystem_router{root = ViewsRoot, prefix = "/"}],
-        modules = [example_router]
+        modules = [example_router],
+        layouts = [filename:join(code:lib_dir(example), "src/layouts")]
     },
     Listener = #listener{
         adapter = weberl_roadrunner,
