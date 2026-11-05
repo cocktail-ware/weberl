@@ -18,6 +18,7 @@ request(Req) ->
         peer => roadrunner_req:peer(Req),
         body_reader => fun() -> {ok, iolist_to_binary(roadrunner_req:body(Req))} end,
         meta => #{adapter => weberl_roadrunner,
+                  raw => Req,
                   listener => roadrunner_req:listener_name(Req),
                   scheme => roadrunner_req:scheme(Req),
                   version => roadrunner_req:version(Req),

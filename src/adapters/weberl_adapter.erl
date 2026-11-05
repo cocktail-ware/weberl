@@ -20,9 +20,20 @@
 %%   <li>`stop_listener/1': stop the listener and release its resources.
 %%       Stopping a listener that is already gone is not an error.</li>
 %%   <li>`port/1': the port the listener actually bound (useful with port 0).</li>
+%%   <li>`cookies/1': the `{Name, Value}' pairs of the request's `Cookie' header(s).</li>
+%%   <li>`form/1': the decoded form of the request body (see below).</li>
 %%   <li>`validate_static/1' (optional): check static mount options. Mounts are
 %%       served by the adapter before the route table is consulted.</li>
 %% </ul>
+%%
+%% `cookies/1' and `form/1' receive the `weberl_request' the adapter built; the
+%% transport's own request is whatever the adapter put in the request's `meta'
+%% (`raw', for Roadrunner). They exist so that parsing, size limits and body
+%% buffering stay with the transport that owns them, while
+%% `weberl_request:cookies/1' and `weberl_request:form/1' give every application
+%% one function, whatever the adapter. Building responses (cookies, redirects) is
+%% transport independent and lives in `weberl_response'; an adapter only has to
+%% send repeated response headers (several `set-cookie') as separate headers.
 -module(weberl_adapter).
 
 -export_type([ref/0]).
@@ -36,6 +47,14 @@
     {ok, ref()} | {error, term()}.
 -callback stop_listener(ref()) -> ok | {error, term()}.
 -callback port(ref()) -> inet:port_number().
+%% `[{Name, Value}]' in wire order; `[]' when the request has no cookies.
+-callback cookies(weberl_request:t()) -> [{binary(), binary()}].
+%% The body of a `application/x-www-form-urlencoded' request as decoded pairs
+%% (a field without `=' is `{Name, true}'). Other content types: `{error,
+%% unsupported_content_type}', or `{error, no_content_type}' when absent;
+%% an unreadable body is the transport's `{error, Reason}'.
+-callback form(weberl_request:t()) ->
+    {ok, [{binary(), binary() | true}]} | {error, term()}.
 %% Optional: static asset mounts. Receives the normalized
 %% `[{UrlPrefix, Source, Opts}]' from the listener record and checks the
 %% adapter-specific `Opts'. An adapter that does not export this rejects any

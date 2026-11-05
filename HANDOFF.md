@@ -69,6 +69,15 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
 - **1**: homogenised Weberl helpers that use the underlying adapter; add the needed
   callbacks to the adapter behaviour. Basic form helpers are needed for CSRF; **CSRF is
   provided by the framework**. Each item gets tests for the exact complaint it solves.
+- **1, split decided (option A)**: the adapter parses (new required callbacks `cookies/1`,
+  `form/1` in `weberl_adapter`; Roadrunner keeps its request in `meta.raw`), Weberl builds
+  (cookies, redirects, repeated headers: pure, validated, one serializer). **1a done**:
+  `weberl_request:cookies/1`, `cookie/2`, `form/1` (urlencoded only), tests in
+  `test/weberl_request_helpers_tests.erl` (real HTTP login-style POST). **Still to do in 1**:
+  `weberl_response:add_header/3`, `set_cookie`, `redirect` (design points: redirect target rules,
+  cookie option validation), then CSRF (framework-provided; Arizona uses an Origin check, no token;
+  decide Origin check only vs. plus a double-submit token and a form helper), the Roadrunner check
+  that two `set-cookie` headers reach the wire, then reply in agentic's `WEBERL_FEEDBACK.md`.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

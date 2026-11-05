@@ -399,6 +399,12 @@ transport connection. There is no per-route process.
 | `peer/1` | `{Address, Port}` or `undefined` |
 | `meta/1` | transport metadata map (Roadrunner: `adapter`, `listener`, `scheme`, `version`, `request_id`) |
 | `read_body/1` | `{ok, binary()} \| {error, Reason}` |
+| `cookies/1`, `cookie/2` | `[{Name, Value}]` in wire order, values raw (not decoded); `cookie(Request, Name)` is `{ok, V} \| error` |
+| `form/1` | `application/x-www-form-urlencoded` body as `{ok, [{Name, Value \| true}]}` (decoded, repeats kept); `{error, unsupported_content_type \| no_content_type \| _}`. Multipart is not supported yet |
+
+`cookies/1` and `form/1` are parsed by the adapter (callbacks of the `weberl_adapter` behaviour), so
+the transport's limits apply (`max_content_length`). A request not built by an adapter (a hand-made
+one in a test) raises `{no_adapter, cookies | form}`: give it `meta => #{adapter => Module}`.
 
 The body is read only when `read_body/1` is called. With the Roadrunner adapter it
 is already in memory (see [limitations](#known-limitations-and-future-work)).

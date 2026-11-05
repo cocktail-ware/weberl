@@ -29,7 +29,7 @@
 -behaviour(weberl_adapter).
 
 -export([validate_options/1, validate_static/1, start_listener/3,
-         stop_listener/1, port/1]).
+         stop_listener/1, port/1, cookies/1, form/1]).
 
 -define(ALLOWED, [max_content_length, request_timeout, tls, protocols]).
 -define(STATIC_ALLOWED, [cache_control, symlink_policy, cache_ttl_ms]).
@@ -92,6 +92,26 @@ stop_listener(Name) ->
 
 -spec port(weberl_adapter:ref()) -> inet:port_number().
 port(Name) -> roadrunner_listener:port(Name).
+
+%% The Roadrunner request is kept in the Weberl request's `meta' as `raw' (see
+%% `weberl_roadrunner_convert').
+-spec cookies(weberl_request:t()) -> [{binary(), binary()}].
+cookies(Request) ->
+    roadrunner_req:parse_cookies(raw(Request)).
+
+%% Only urlencoded forms: multipart is not supported by `weberl_request:form/1'
+%% yet, so it is an error here rather than a list of parts nobody expects.
+-spec form(weberl_request:t()) -> {ok, [{binary(), binary() | true}]} | {error, term()}.
+form(Request) ->
+    case roadrunner_req:read_form(raw(Request)) of
+        {ok, urlencoded, Pairs, _Req} -> {ok, Pairs};
+        {ok, multipart, _Parts, _Req} -> {error, unsupported_content_type};
+        {error, _} = Error -> Error
+    end.
+
+raw(Request) ->
+    #{raw := Raw} = weberl_request:meta(Request),
+    Raw.
 
 %% Internal
 

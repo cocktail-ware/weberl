@@ -23,7 +23,8 @@
 
 -export([new/1,
          method/1, path/1, headers/1, header/2, query/1, query_params/1,
-         params/1, peer/1, meta/1, read_body/1, page/1, with_page/2]).
+         params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1,
+         page/1, with_page/2]).
 -export_type([t/0]).
 -export_record([request]).
 
@@ -100,6 +101,33 @@ peer(#request{peer = P}) -> P.
 -spec meta(t()) -> map().
 meta(#request{meta = M}) -> M.
 
+%% @doc The request's cookies as `[{Name, Value}]' in wire order, parsed by the
+%% adapter (`weberl_adapter' callback `cookies/1'); `[]' when there are none.
+%% Values are not decoded: what the client sent is what you get. Raises
+%% `{no_adapter, cookies}' for a request that was not built by an adapter.
+-spec cookies(t()) -> [{binary(), binary()}].
+cookies(#request{} = R) ->
+    (adapter(R, cookies)):cookies(R).
+
+%% @doc The first cookie named `Name' (case-sensitive), `{ok, Value} | error'.
+-spec cookie(t(), iodata()) -> {ok, binary()} | error.
+cookie(#request{} = R, Name) ->
+    case lists:keyfind(iolist_to_binary(Name), 1, cookies(R)) of
+        {_, V} -> {ok, V};
+        false -> error
+    end.
+
+%% @doc The body of an `application/x-www-form-urlencoded' request as
+%% `[{Name, Value | true}]' (binaries; `+' and percent escapes decoded; a field
+%% without `=' is `true'; names may repeat, in order). Any other content type is
+%% `{error, unsupported_content_type}' (`multipart/form-data' too, for now) and a
+%% missing one `{error, no_content_type}'. The adapter reads the body, so its
+%% size limit applies (`max_content_length' for Roadrunner). Raises
+%% `{no_adapter, form}' for a request that was not built by an adapter.
+-spec form(t()) -> {ok, [{binary(), binary() | true}]} | {error, term()}.
+form(#request{} = R) ->
+    (adapter(R, form)):form(R).
+
 %% @doc The live page id when the route is `one_way' / `two_way', else
 %% `undefined'. Pass it to whatever pushes updates with `weberl_live:push/3'.
 -spec page(t()) -> undefined | binary().
@@ -115,6 +143,9 @@ read_body(#request{body_reader = undefined}) -> {ok, <<>>};
 read_body(#request{body_reader = Reader}) -> Reader().
 
 %% Internal
+
+adapter(#request{meta = #{adapter := Adapter}}, _Function) -> Adapter;
+adapter(#request{}, Function) -> erlang:error({no_adapter, Function}).
 
 reader(#{body_reader := F}) when is_function(F, 0) -> F;
 reader(#{body := B}) when is_binary(B) -> fun() -> {ok, B} end;
