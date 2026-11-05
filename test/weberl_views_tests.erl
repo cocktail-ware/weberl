@@ -78,6 +78,8 @@ e2e_test_() ->
       {"missing variable is a 500", fun missing_variable_is_500/0},
       {"unassociated template fails startup", fun unassociated_template/0},
       {"invalid template fails startup, nothing left", fun invalid_template/0},
+      {"links are checked against the router's routes", fun links_to_routes/0},
+      {"a link to a route that does not exist fails startup", fun link_to_unknown_route/0},
       {"template is not re-read per request", fun not_reread/0},
       {"restart picks up an edited template", fun restart_recompiles/0}]}.
 
@@ -202,6 +204,50 @@ invalid_template() ->
                      Result),
         ?assertEqual(undefined, whereis(Name)),
         ?assertNot(weberl_template:has_template(list_to_atom(V)))
+    end).
+
+%% The home page links to `/about' and to `/docs/<page>' (routes of the same router):
+%% the router start verifies them against its table, and rendering needs no router.
+links_to_routes() ->
+    with_tmp(fun(Dir) ->
+        Home = view_name("lhome"),
+        About = view_name("labout"),
+        Intro = view_name("lintro"),
+        write_tree(Dir,
+                   [{Home ++ ".erl", view_src(Home, "#{page => <<\"intro\">>, id => <<\"a b/c\">>}")},
+                    {Home ++ ".weberl",
+                     <<"<a href=\"{{ weberl_url:router_path(\"/about\") }}\">about</a>"
+                       "<a href=\"{{ weberl_url:router_path(\"/docs/{{ @page }}\", #{no_warn => true}) }}\">docs</a>"
+                       "<a href=\"/items/{{ weberl_url:component(@id) }}\">item</a>">>},
+                    {"about/" ++ About ++ ".erl", plain_view_src(About, "about")},
+                    {"docs/intro/" ++ Intro ++ ".erl", plain_view_src(Intro, "intro")}]),
+        [compile_load(filename:join(Dir, F)) || F <- [Home ++ ".erl", "about/" ++ About ++ ".erl",
+                                                      "docs/intro/" ++ Intro ++ ".erl"]],
+        Name = router_name(),
+        {ok, _} = weberl:start_link(Name, fs_router(Dir), listener()),
+        try
+            ?assertMatch({200, _, <<"<a href=\"/about\">about</a>"
+                                    "<a href=\"/docs/intro\">docs</a>"
+                                    "<a href=\"/items/a%20b%2Fc\">item</a>">>},
+                         get(Name, "/"))
+        after
+            weberl:stop(Name)
+        end
+    end).
+
+link_to_unknown_route() ->
+    with_tmp(fun(Dir) ->
+        V = view_name("ltypo"),
+        write_tree(Dir, [{V ++ ".erl", plain_view_src(V, "x")},
+                         {V ++ ".weberl", <<"<p>ok</p>\n<a href=\"{{ weberl_url:router_path(\"/abuot\") }}\">x</a>">>}]),
+        compile_load(filename:join(Dir, V ++ ".erl")),
+        Name = router_name(),
+        Result = start_failing(Name, fs_router(Dir)),
+        File = filename:join(Dir, V ++ ".weberl"),
+        ?assertMatch({error, {invalid_templates,
+                              [{_, {syntax_error, File, 2, {unknown_route, <<"/abuot">>}}}]}},
+                     Result),
+        ?assertEqual(undefined, whereis(Name))
     end).
 
 not_reread() ->

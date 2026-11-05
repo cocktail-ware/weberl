@@ -86,6 +86,12 @@ part({region, Line, Name, Tag, Children}, View) ->
     {Open, Close} = wrapper(Name, Tag),
     {cons, Line, erl_parse:abstract(Open),
      {cons, Line, body(Children, View), {cons, Line, erl_parse:abstract(Close), {nil, Line}}}};
+%% inside a URL attribute: only a `weberl_url' value, checked against the attribute
+part({expr, Line, escaped, #{form := Form, url := #{policy := Policy, position := Position}}}, View) ->
+    Value = weberl_blocks_expr:render(Form, hooks(View)),
+    {call, Line, {remote, Line, {atom, Line, weberl_template_runtime}, {atom, Line, url}},
+     [Value, {atom, Line, View}, {integer, Line, Line},
+      erl_parse:abstract({Policy, Position}, Line)]};
 part({expr, Line, Mode, #{form := Form, source := Source}}, View) ->
     Fun = case Mode of escaped -> escaped; raw -> raw end,
     Value = weberl_blocks_expr:render(Form, hooks(View)),

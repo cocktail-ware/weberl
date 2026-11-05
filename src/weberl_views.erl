@@ -33,11 +33,11 @@ prepare(Router, Table) ->
                  || R <- Routes, weberl_route:origin(R) =/= filesystem,
                     weberl_route:layout(R) =/= none],
     case Misplaced of
-        [] -> prepare(Router, Views, Selected);
+        [] -> prepare(Router, Views, Selected, Table);
         _ -> {error, {invalid_templates, Misplaced}}
     end.
 
-prepare(Router, Views, Selected) ->
+prepare(Router, Views, Selected, Table) ->
     LayoutFiles = lists:sort(lists:append([weberl_template:discover(D)
                                            || D <- weberl_config:layouts(Router)])),
     Templates = [T || T <- lists:append([weberl_template:discover(weberl_config:root(F))
@@ -46,7 +46,7 @@ prepare(Router, Views, Selected) ->
     case weberl_template:associate(Templates, Views) of
         {ok, Pairs} ->
             case layouts(LayoutFiles) of
-                {ok, Layouts} -> compile_all(Pairs, Views, Layouts, Selected);
+                {ok, Layouts} -> compile_all(Pairs, Views, Layouts, Selected, Table);
                 {error, _} = Error -> Error
             end;
         {error, _} = Error ->
@@ -68,26 +68,35 @@ layouts(Files) ->
             {error, {duplicate_layouts, Dups}}
     end.
 
-compile_all(Pairs, Views, Layouts, Selected) ->
+compile_all(Pairs, Views, Layouts, Selected, Table) ->
     Templated = [View || {View, _} <- Pairs],
     Orphans = [{View, layout_without_template} || {View, _} <- Views,
                    not lists:member(View, Templated), maps:get(View, Selected) =/= none],
-    Results = [{View, compile(View, File, Layouts, maps:get(View, Selected))}
+    Results = [{View, compile(View, File, Layouts, maps:get(View, Selected), #{routes => Table})}
                || {View, File} <- Pairs],
     case Orphans ++ [{View, Reason} || {View, {error, Reason}} <- Results] of
         [] ->
-            lists:foreach(fun({_, {ok, Compiled}}) -> weberl_template:load(Compiled) end, Results);
+            lists:foreach(fun({_, {ok, Compiled}}) ->
+                                  log_warnings(weberl_template:warnings(Compiled)),
+                                  weberl_template:load(Compiled)
+                          end, Results);
         Errors ->
             {error, {invalid_templates, Errors}}
     end.
 
-compile(View, File, _Layouts, none) ->
-    weberl_template:compile_file(View, File);
-compile(View, File, Layouts, {ok, Name}) ->
+compile(View, File, _Layouts, none, Opts) ->
+    weberl_template:compile_file(View, File, none, Opts);
+compile(View, File, Layouts, {ok, Name}, Opts) ->
     case Layouts of
-        #{Name := Layout} -> weberl_template:compile_file(View, File, Layout);
+        #{Name := Layout} -> weberl_template:compile_file(View, File, Layout, Opts);
         _ -> {error, {unknown_layout, Name}}
     end.
 
+
+%% What the template compiler warned about (a link with a placeholder, say), once per router start.
+log_warnings(Warnings) ->
+    lists:foreach(fun({warning, File, Line, Reason}) ->
+                          logger:warning("~ts:~p: template warning: ~p", [File, Line, Reason])
+                  end, Warnings).
 
 norm(Path) -> filename:join(filename:split(Path)).

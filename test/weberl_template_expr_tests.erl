@@ -160,8 +160,8 @@ reserved_names_are_refused_test() ->
     ?assertEqual({1, {reserved_variable, '_Weberl_x'}}, err(<<"{{ _Weberl_x }}">>)).
 
 html_context_rules_apply_to_expressions_test() ->
-    ?assertEqual({1, {interpolation_in_restricted_attribute, <<"href">>}},
-                 err(<<"<a href=\"{{ @a + 1 }}\">x</a>">>)),
+    ?assertEqual({1, {interpolation_in_restricted_attribute, <<"style">>}},
+                 err(<<"<p style=\"{{ @a + 1 }}\">x</p>">>)),
     ?assertEqual({1, {interpolation_in_unsupported_context, tag}}, err(<<"<p {{ @a }}>x</p>">>)),
     ?assertEqual({1, {interpolation_in_unsupported_context, <<"script">>}},
                  err(<<"<script>{{ @a }}</script>">>)),

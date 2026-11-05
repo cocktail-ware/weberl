@@ -219,18 +219,18 @@ rejected_contexts_test_() ->
          {<<"<script>var x = \"{{@a}}\";</script>">>, {interpolation_in_unsupported_context, <<"script">>}},
          {<<"<SCRIPT>{{@a}}</SCRIPT>">>, {interpolation_in_unsupported_context, <<"script">>}},
          {<<"<style>p { color: {{@a}} }</style>">>, {interpolation_in_unsupported_context, <<"style">>}},
-         {<<"<a href=\"{{@a}}\">x</a>">>, {interpolation_in_restricted_attribute, <<"href">>}},
-         {<<"<A HREF=\"{{@a}}\">x</A>">>, {interpolation_in_restricted_attribute, <<"href">>}},
-         {<<"<img src='{{@a}}'>">>, {interpolation_in_restricted_attribute, <<"src">>}},
-         {<<"<form action=\"/x/{{@a}}\">">>, {interpolation_in_restricted_attribute, <<"action">>}},
+         {<<"<img srcset=\"{{@a}}\">">>, {interpolation_in_restricted_attribute, <<"srcset">>}},
+         {<<"<IMG SRCSET='{{@a}}'>">>, {interpolation_in_restricted_attribute, <<"srcset">>}},
+         {<<"<object data=\"{{@a}}\">x</object>">>, {interpolation_in_restricted_attribute, <<"data">>}},
+         {<<"<iframe srcdoc=\"/x/{{@a}}\">">>, {interpolation_in_restricted_attribute, <<"srcdoc">>}},
          {<<"<a onclick=\"{{@a}}\">x</a>">>, {interpolation_in_restricted_attribute, <<"onclick">>}},
          {<<"<p style=\"{{@a}}\">x</p>">>, {interpolation_in_restricted_attribute, <<"style">>}},
          {<<"<p title=\"{{{@a}}}\">x</p>">>, {raw_interpolation_in_attribute, <<"title">>}}],
     [?_assertEqual({1, Reason}, err(Src)) || {Src, Reason} <- Cases].
 
 rejected_context_reports_line_test() ->
-    ?assertEqual({3, {interpolation_in_restricted_attribute, <<"href">>}},
-                 err(<<"<p>\n  ok {{ @a }}\n  <a href=\"{{ @b }}\">x</a>\n</p>">>)
+    ?assertEqual({3, {interpolation_in_restricted_attribute, <<"srcset">>}},
+                 err(<<"<p>\n  ok {{ @a }}\n  <img srcset=\"{{ @b }}\">\n</p>">>)
                  ),
     ok.
 

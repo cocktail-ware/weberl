@@ -3,8 +3,7 @@
 %% what it uses.
 %%
 %% This module and the other `weberl_blocks_*' modules know nothing of HTML, regions
-%% or Weberl: they call only OTP, so they can be lifted into another library (a CSS
-%% preprocessor, say) as they are. What belongs to the consumer is passed in as
+%% or Weberl: they call only OTP. What belongs to the consumer is passed in as
 %% hooks, see {@link render/2}. The language is described in `TEMPLATE_BLOCKS.md'.
 %%
 %% == Assigns and locals ==

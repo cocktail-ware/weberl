@@ -2,27 +2,18 @@
 
 The block language of Weberl's templates: `{{ Expr }}` interpolation and `{: if :}`, `{: case :}`,
 `{: for :}` with **Erlang expressions and patterns**. This document describes the language, what the code
-generates, the hooks a host provides, and how another library (a CSS preprocessor, say) can reuse it.
-The decisions behind it are in `HANDOFF.md` ("2"); the user-facing description is in the README
-("Templates"). Weberl is the first host; `~/code/csserl` (an Erlang port of the CSS preprocessor CSSEx) is the
-expected second.
+generates and the hooks the host provides. The decisions behind it are in `HANDOFF.md` ("2"); the user-facing
+description is in the README ("Templates").
 
-## Status of the boundary
+## Where the code is
 
-Only part of the machinery is separated from Weberl today. Be exact about it before reusing anything:
-
-| Piece | Where | Independent of Weberl/HTML? |
-|---|---|---|
-| Expression front end: text to Erlang abstract forms, `@name`, line offsets, free/bound locals, rebinding, `render/2` with hooks | `src/template/blocks/weberl_blocks_expr.erl` | **Yes.** Calls only OTP; a test asserts it imports nothing of Weberl |
-| Tag lexing (`{{ }}`, `{: :}`) | `weberl_template_lexer` | No: also knows regions, slots, fills, void HTML elements |
-| Block structure (frames for `if`/`case`/`for`, branch rules), scope pass, dependency collection | `weberl_template_parser` | No: interleaved with regions, layouts and the HTML context walker |
-| Code generation for `if`/`case`/`for` | `weberl_template_compiler` | No: emitted next to region and wrapper code |
-| Value rendering, escaping | `weberl_template_runtime` | No: HTML escaping, the supported value types |
-
-The plan (HANDOFF decision 7) is to move the independent parts of rows 2 to 4 behind host hooks, as
-`weberl_blocks_*` modules that call nothing of Weberl, and to extract the whole into its own application when a
-second consumer exists. Until then, a second host can use `weberl_blocks_expr` as it is and copy or lift the
-block structure, scope and code generation from the three Weberl modules above.
+| Piece | Where |
+|---|---|
+| Expression front end: text to Erlang abstract forms, `@name`, line offsets, free/bound locals, rebinding, tag-end scanner, `render/2` with hooks | `src/template/blocks/weberl_blocks_expr.erl` (calls only OTP; a test asserts it imports nothing of Weberl) |
+| Tag lexing (`{{ }}`, `{: :}`) | `weberl_template_lexer` |
+| Block structure (frames for `if`/`case`/`for`, branch rules), scope pass, dependency collection | `weberl_template_parser` |
+| Code generation for `if`/`case`/`for` | `weberl_template_compiler` |
+| Value rendering, escaping | `weberl_template_runtime` |
 
 ## The language
 
@@ -75,8 +66,7 @@ but not bound by the text itself, which an enclosing block must bind) and `bound
 
 ## Generated code
 
-The generator produces Erlang abstract forms; the host decides whether to compile them into a module (Weberl)
-or run them (`erl_eval:expr/2` with bindings: no module, suited to a one-shot job).
+The generator produces Erlang abstract forms, which Weberl compiles into a module per view.
 
 | Block | Forms |
 |---|---|
@@ -98,30 +88,13 @@ missing guard assign raises even when an earlier clause would have matched.
 
 ## Hooks a host provides
 
-| Hook | Weberl's | What a CSS host would do |
-|---|---|---|
-| `assign(Name, Anno) -> Form` and `local(Name) -> Name'` for `weberl_blocks_expr:render/2` | `weberl_template_runtime:assign/3`; `W_` prefix | read a map of theme variables; any prefix |
-| Value rendering of an interpolation | binaries, character lists, integers, floats, atoms; HTML escaping | floats and units, colors, no HTML escaping (or CSS string escaping) |
-| Context rules (where a block or interpolation may stand) | `weberl_template_html`: text and quoted attribute values only | none, or a small CSS context (inside a string, a url) |
-| Delimiters | `{{ }}`, `{: :}` | the same: `{:` and `:}` do not occur in valid CSS, and `\{:` escapes |
-| Host-only constructs | regions, slots, fills, `{: content :}`, layouts, live updates | its own (selector tables, mixins...), or none |
-
-## Using it from a CSS preprocessor
-
-The CSSEx test of `<%= for n <- 1..10, reduce: "" do ... %>` builds a string by code; with blocks the loop body
-is the CSS text:
-
-```css
-{: for N <- lists:seq(1, 10) :}
-.btn-op-{{ N }} { background-color: rgba(255, 0, 0, {{ N / 10 }}); }
-{: /for :}
-```
-
-Differences from CSSEx to keep in mind: CSSEx evaluates a block at parse time and parses its result again as
-CSS, whereas here a template renders to text in one pass (a second stage can still process the result); CSSEx
-variables hold any Elixir term and are read as `@name` in blocks, which matches; expressions are Erlang, so
-the Elixir-to-Erlang translation problem for blocks disappears. The CSSEx test suite (`test/eex_test.exs` and
-others in github mnussbaumer/cssex) is the natural acceptance set for the port.
+| Hook | Weberl's |
+|---|---|
+| `assign(Name, Anno) -> Form` and `local(Name) -> Name'` for `weberl_blocks_expr:render/2` | `weberl_template_runtime:assign/3`; `W_` prefix |
+| Value rendering of an interpolation | binaries, character lists, integers, floats, atoms; HTML escaping |
+| Context rules (where a block or interpolation may stand) | `weberl_template_html`: text and quoted attribute values only |
+| Delimiters | `{{ }}`, `{: :}` |
+| Weberl-only constructs | regions, slots, fills, `{: content :}`, layouts, live updates |
 
 ## Known limits
 

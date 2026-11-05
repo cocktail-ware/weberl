@@ -186,13 +186,11 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   machinery is modules in Weberl's source tree under `src/template/blocks/` (prefix `weberl_blocks_`) that call
   nothing else in Weberl, only OTP: expression front end (text -> Erlang abstract forms, `@name` rewriting, line
   offsets), scope analysis (free/bound locals, rebinding), dependency collection, block code generation; host
-  hooks for assign access, local renaming and value rendering. The generator produces abstract forms, so a
-  consumer may compile them into a module (Weberl) or run them with `erl_eval` (csserl, a one-shot CSS
-  preprocess). HTML walker, regions/slots/fills/content, layouts, escaping and live updates stay Weberl-specific.
-  `TEMPLATE_BLOCKS.md` documents the language, AST, errors and hooks. Extract into its own application when
-  csserl becomes the second consumer (a dependency of Weberl on csserl would make a cycle otherwise); CSSEx's
-  tests (`~/code/csserl` is a skeleton; the original is github mnussbaumer/cssex, eex_test.exs etc.) are
-  acceptance cases for that port. **Decision 8 (user): accepted**, expression interpolation: `{{ Expr }}` /
+  hooks for assign access, local renaming and value rendering. The generator produces abstract forms, so they
+  can be compiled into a module (Weberl) or run with `erl_eval`. HTML walker, regions/slots/fills/content,
+  layouts, escaping and live updates stay Weberl-specific. `TEMPLATE_BLOCKS.md` documents the language, AST,
+  errors and hooks. (2026-11-05, user: reuse by another library is parked; no extraction work until the user
+  raises it again.) **Decision 8 (user): accepted**, expression interpolation: `{{ Expr }}` /
   `{{{ Expr }}}` is any Erlang expression rendered through the host's value rules; a bare lowercase name stays
   the assign shorthand, a bare capitalized name is a local; the tag ends at the first `}}` (`}}}` for raw), so an
   expression containing `}}` (nested maps) needs a space (`} }`); dependencies are its `@names`; the HTML
@@ -232,8 +230,7 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   unit tests. `TEMPLATE_BLOCKS.md` written (README links it); agentic's `WEBERL_FEEDBACK.md` updated. **Honest
   gap against decision 7**: only `weberl_blocks_expr` is separated from Weberl; block lexing/structure, the
   scope pass and the `if`/`case`/`for` code generation still live in `weberl_template_lexer`/`_parser`/`_compiler`
-  next to regions and the HTML walker (TEMPLATE_BLOCKS.md says so); moving them behind host hooks is the
-  remaining extraction work. No e2e spec exercises blocks in a real browser (the live test covers the server
+  next to regions and the HTML walker (TEMPLATE_BLOCKS.md says so); parked. No e2e spec exercises blocks in a real browser (the live test covers the server
   side; the browser patching of regions is covered by the existing region specs); 3 block tags: lexer, parser, validation, scope pass,
   region rules; 4 layout composition through blocks; 5 compiler and runtime for blocks; 6 README,
   `TEMPLATE_BLOCKS.md`, agentic feedback. Item 3 (safe URLs) follows and depends on this.
@@ -306,12 +303,37 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   second argument is the options map (`router`, `query`, `no_warn`); `query` replaces the query argument of
   decision 8. Still to build: step 3 compile-time analysis (routes option, placeholders, attribute policy,
   warnings), step 4 render-time policy and ambient router set by dispatch and live sessions, README/guides.
+- **Step 3 built (2026-11-05), item 3 complete on the Weberl side.** `weberl_template_urls:analyze/3` runs on
+  the composed AST (after layout composition, before `check_scope`, which also covers placeholder locals);
+  `weberl_template_html:url_attribute/1` and `url_policy/2`; `weberl_template_runtime:url/4` is the render-time
+  check (`{untagged_url, View, Line, Value}`, `{unsafe_url, View, Line, Tagged}`); compile functions
+  `compile_source/5`, `compile_file/4` with `#{routes => Table}` and `weberl_template:warnings/1`
+  (`{warning, File, Line, Reason}`), `weberl_views:prepare` passes the table and logs warnings. Compile errors
+  use the `{syntax_error, File, Line, Reason}` shape (not `{template_error, ...}`) like every other compile error.
+  **Revision of decision 9 (render-time backstop)**: a render can run in any process (session, caller of
+  `update/3`, an agent calling `update_topic/4`), so an ambient per-request router would be missing there.
+  Instead, when the template is compiled with the table, the compiler embeds the routes a call can match (one
+  for a literal, every route of the pattern's shape for placeholders) in the generated code
+  (`weberl_url:router_path_known/3`, `router_url_known/3`); the render-time check is a lookup in that map and
+  needs no router and no process state; dispatch and live sessions set nothing. The ambient router
+  (`weberl_url:with_router/2`) and the `router` option remain only for templates compiled without a table
+  (unit tests): those compile to `router_path_parts/2` and look the router up when rendered (`no_router` when
+  there is none). Resolution of an inconsistency in decision 8: `<object data>` stays literal-only (`data` is in
+  the literal-only list), so it is not a sink that takes paths; `use` (`href`, `xlink:href`) joins the
+  local-only sinks; in `local_only` position `url` and `router_url` are refused statically and at render
+  (even for a value that happens to be local). Tests: `weberl_template_urls_tests` (complaints: an id in a
+  path, `next` as a query value, `javascript:`, a typo'd route, placeholders, policy per element),
+  `weberl_live_urls_tests` (links in a region re-rendered by the session and by `update/3` from another
+  process), `weberl_views_tests` (router start verifies links, a typo fails the start with file and line),
+  `weberl_url_helpers_tests`; 915 eunit tests; the browser suite was not re-run (no browser-side change).
+  README "Links" written. Roadmap order given by the user afterwards: dynamic router paths, multipart forms
+  (agentic needs them), blocks inside tags and attributes, runtime layouts.
 - **Decision 10 (tag ends are found by an Erlang-aware scanner; user, 2026-11-05).** Replaces "a tag ends at the
   first `}}`/`:}`". Delimiters stay `{{ }}`, `{{{ }}}`, `{: :}` (alternatives `{: :}`/`{:: ::}` for
   interpolation and a plain `{{`/`}}` counter were considered and rejected: the counter breaks on
   `{{ {{a, b}, c} }}` and `#{k => #{j => 1}}`; the swap merges the interpolation and block namespaces and
   collides with Erlang's `case`/`if` expressions). The scanner lives in `weberl_blocks_expr` (no Weberl or HTML
-  knowledge, reusable by csserl). While looking for the end of a tag it treats strings `"..."`, quoted atoms,
+  knowledge). While looking for the end of a tag it treats strings `"..."`, quoted atoms,
   character literals (`$}`, `$"`) and comments as opaque, keeps a depth for `( [ { <<`, and ends the tag at
   `}}` (`}}}` for raw) / `:}` only at depth 0. Effects: `{{ f("{{ @x }}") }}` and
   `{{ #{k => #{j => 1}} }}` work without a space; `{{{ #{a => 1} }}}` works. Errors:

@@ -7,14 +7,20 @@
 %% nowhere else. Interpolation is therefore only allowed in:
 %% <ul>
 %%   <li>text nodes (escaped or raw);</li>
-%%   <li>quoted attribute values (escaped only), except in URL-bearing
-%%       attributes (`href', `src', ...), event handlers (`on*'), `style' and a
-%%       few similar attributes, which need context-specific encoding.</li>
+%%   <li>quoted attribute values (escaped only), except in event handlers (`on*'),
+%%       `style' and a few similar attributes, which need context-specific encoding.
+%%       The URL attributes (see {@link url_attribute/1}) take interpolation too, but
+%%       only a value made by `weberl_url' (checked by `weberl_template_urls').</li>
 %% </ul>
 -module(weberl_template_html).
 
--export([initial/0, advance/2, check/2]).
--export_type([ctx/0]).
+-export([initial/0, advance/2, check/2, url_attribute/1, url_policy/2]).
+-export_type([ctx/0, policy/0]).
+
+%% What a URL attribute of an element accepts (HANDOFF decision 8): `web' a path on
+%% this site or an `http(s)' URL, `local_only' a path on this site only (elements that
+%% load code or change the base of every link).
+-type policy() :: web | local_only.
 
 -type ctx() :: text | lt | comment | declaration | end_tag
              | {raw_text, binary()}
@@ -43,6 +49,7 @@ check({value, _, _, Attr}, Mode) ->
     case {Mode, restricted(Attr)} of
         {raw, _} -> {error, {raw_interpolation_in_attribute, Attr}};
         {_, true} -> {error, {interpolation_in_restricted_attribute, Attr}};
+        %% a URL attribute takes escaped interpolation; `weberl_template_urls' checks what is in it
         _ -> ok
     end;
 check(comment, _) -> unsupported(comment);
@@ -55,13 +62,29 @@ check(_, _) -> unsupported(tag).
 
 unsupported(Where) -> {error, {interpolation_in_unsupported_context, Where}}.
 
+%% Attributes that stay literal: interpolation needs an encoding no helper provides.
 restricted(<<"on", _/binary>>) -> true;
 restricted(Attr) ->
-    lists:member(Attr, [<<"style">>, <<"href">>, <<"src">>, <<"srcset">>, <<"action">>,
-                        <<"formaction">>, <<"data">>, <<"poster">>, <<"cite">>,
+    lists:member(Attr, [<<"style">>, <<"srcset">>, <<"data">>,
                         <<"background">>, <<"ping">>, <<"manifest">>, <<"codebase">>,
-                        <<"longdesc">>, <<"usemap">>, <<"srcdoc">>, <<"xlink:href">>,
-                        <<"is">>]).
+                        <<"longdesc">>, <<"usemap">>, <<"srcdoc">>, <<"is">>]).
+
+%% @doc Attributes whose value is a URL: interpolation there has to be a `weberl_url'
+%% value (see `weberl_template_urls').
+-spec url_attribute(binary()) -> boolean().
+url_attribute(Attr) ->
+    lists:member(Attr, [<<"href">>, <<"src">>, <<"action">>, <<"formaction">>, <<"poster">>,
+                        <<"cite">>, <<"xlink:href">>]).
+
+%% @doc The policy of a URL attribute on an element: elements that run code or change
+%% what every link means (`script', `iframe', `embed', `frame', `base', `link', and `use',
+%% which pulls in another document) take paths on this site only.
+-spec url_policy(binary(), binary()) -> policy().
+url_policy(Tag, <<"src">>) when Tag =:= <<"script">>; Tag =:= <<"iframe">>;
+                                Tag =:= <<"embed">>; Tag =:= <<"frame">> -> local_only;
+url_policy(Tag, <<"href">>) when Tag =:= <<"base">>; Tag =:= <<"link">>; Tag =:= <<"use">> -> local_only;
+url_policy(<<"use">>, <<"xlink:href">>) -> local_only;
+url_policy(_, _) -> web.
 
 %% Transitions
 

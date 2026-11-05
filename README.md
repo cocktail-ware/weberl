@@ -112,15 +112,16 @@ src/
 │   ├── weberl_session.erl      the encrypted session cookie
 │   ├── weberl_flash.erl        flash on top of the session
 │   ├── weberl_sign.erl         the signing/encryption key shared by tokens and sessions
-│   └── weberl_url.erl          is a redirect target a path on this site
+│   └── weberl_url.erl          URL checks and the URL helpers of templates (component, ensure_path, router_path...)
 ├── template/
 │   ├── weberl_template.erl             public API: render, compile, discover
 │   ├── weberl_template_lexer.erl       text, {{ }}, {: :} tags
 │   ├── weberl_template_parser.erl      parse (blocks, scope) + validate
-│   ├── weberl_template_html.erl        HTML context tracking
+│   ├── weberl_template_html.erl        HTML context tracking, URL attributes and their policy
+│   ├── weberl_template_urls.erl        links in URL attributes: checks, route verification, placeholders
 │   ├── weberl_template_layout.erl      layouts: content, slots, fills
 │   ├── weberl_template_compiler.erl    AST -> generated module
-│   ├── weberl_template_runtime.erl     assign lookup, value conversion, escaping
+│   ├── weberl_template_runtime.erl     assign lookup, value conversion, escaping, URL attribute check
 │   └── blocks/
 │       └── weberl_blocks_expr.erl      Erlang expressions in tags; no Weberl dependency (TEMPLATE_BLOCKS.md)
 ├── live/                       live pages
@@ -208,6 +209,7 @@ setting you should treat as required in production is `live_secret`.
 | `session_ttl` | `172800` | seconds a new [session](#session) lives (two days). |
 | `session_warn_bytes`, `session_max_bytes` | `3000`, `3800` | session cookie size (name + value) that logs a warning, and the hard limit (a `500`); the limit never exceeds 4096. |
 | `flash_ttl` | `300` | seconds an unread [flash](#flash) lives. |
+| `public_url` | unset | the site's own origin (`<<"https://example.com">>`, no path), put in front of `weberl_url:router_url/1,2`. Without it `router_url` raises `no_public_url`; the `Host` header of a request is never used. |
 | `secure_cookies` | `false` | `true` makes the cookies Weberl sets itself (CSRF, session, flash) `Secure` and `__Host-`-prefixed. **Set it in production** (HTTPS); a `Secure` cookie is dropped over plain HTTP, which breaks local development. |
 | `live_subscribe_timeout` | `10000` | ms a freshly opened WebSocket may wait to subscribe its first page before it is closed. |
 | `live_attach_timeout` | `30000` | ms a rendered page may wait for its first connection before the session ends. |
@@ -664,8 +666,73 @@ Interpolation is allowed in **HTML text** and in **quoted attribute values**
 (escaped only). Escaping alone is not enough in JavaScript, CSS or URLs, so these
 are rejected when the template is compiled: inside `<script>` / `<style>`, HTML
 comments, tags, attribute names, unquoted attribute values, raw `{{{ }}}` inside
-an attribute, and URL or code attributes (`href`, `src`, `action`, `style`, `on*`
-and similar). Literal values in those places are of course fine.
+an attribute, and the code and style attributes (`style`, `on*`, `srcdoc`, `srcset`,
+`data` and a few similar ones). Literal values in those places are of course fine.
+The URL attributes (`href`, `src`, `action`, `formaction`, `poster`, `cite`,
+`xlink:href`) take interpolation too, but only a value made by `weberl_url`: see
+[Links](#links).
+
+### Links
+
+HTML escaping makes a value safe in an attribute, not in a URL: `javascript:alert(1)` survives it, and an
+id with a `/` or a `?` changes what the link means. So in a URL attribute an interpolation has to be a
+**tagged value** from `weberl_url`; anything else is an error (at compile time when the compiler can see
+it, otherwise when the page renders).
+
+```html
+<a href="/agents/{{ weberl_url:component(@id) }}">agent</a>        <!-- one encoded path segment -->
+<a href="/login?next={{ weberl_url:component(@next) }}">log in</a>  <!-- an encoded query value -->
+<form action="/search?{{ weberl_url:query(#{q => @q, page => 2}) }}">  <!-- k=v&k=v, encoded -->
+<a href="{{ weberl_url:ensure_path(@next) }}">back</a>              <!-- a path on this site, or an error -->
+<a href="{{ weberl_url:url(@website) }}">site</a>                   <!-- a path or an http(s) URL -->
+<a href="{{ weberl_url:router_path("/agents") }}">agents</a>        <!-- a route of this router -->
+<a href="{{ weberl_url:unsafe_url(@link) }}">anything</a>           <!-- no checks (still HTML-escaped) -->
+```
+
+| Helper | Makes | Where |
+|---|---|---|
+| `component(V)` | `V` percent-encoded (`a b/c` is `a%20b%2Fc`; integers and atoms work) | after literal text |
+| `query(Map or Pairs)` | `k=v&k=v`, each encoded | after literal text |
+| `ensure_path(V)` | `V` if it is a path on this site (starts with one `/`, not `//` or `/\`, no control characters), else raises `{not_a_path, V}` | a whole value |
+| `url(V)` | `V` if it is such a path or an `http(s)` URL with a host, else raises `{not_a_url, V}` | a whole value |
+| `router_path(Path[, Opts])` | the path, if it is a route of the router, else `{unknown_route, Path}` | a whole value |
+| `router_url(Path[, Opts])` | the same, in front of the `public_url` setting | a whole value |
+| `unsafe_url(V)` | `V` unchecked, **escaped for HTML**; for links your code builds and vouches for | anywhere |
+
+A *whole value* helper has to begin the attribute (`href="{{ ... }}"`, text after it is fine), a *part*
+helper has to follow literal text (or another interpolation). A misplaced one is a compile error
+(`{misplaced_url_helper, Helper}`). The elements that run code or change what every link means
+(`<script src>`, `<iframe src>`, `<embed src>`, `<frame src>`, `<link href>`, `<base href>`, `<use href>`)
+take local paths only: `ensure_path`, `router_path`, `unsafe_url`, or a part after a local prefix
+(`src="/static/{{ weberl_url:component(@v) }}.js"`); anything else is
+`{url_not_allowed_here, Helper, Tag, Attr}`. A literal argument is checked when the template compiles
+(`ensure_path("https://x.com")` does not compile). The helpers are ordinary functions: they can be used in
+handlers too, for example for a redirect target.
+
+**Links to your own routes** are checked when the router starts. `router_path("/agents")` has to name a
+route; a typo fails the start with the file and line (`{unknown_route, <<"/agnts">>}`) instead of
+producing a dead link. The path has to be written out: `router_path(@target)` is a compile error
+(`{unverifiable_route, router_path}`), use `ensure_path` for an unverified path. For a route with a dynamic
+part, put `{{ }}` placeholders in the string:
+
+```html
+<a href="{{ weberl_url:router_path("/docs/{{ @page }}") }}">docs</a>
+```
+
+Each placeholder is **exactly one path segment**: its value is percent-encoded (a value with a `/` cannot
+turn into two segments), must not be empty, and the built path has to be a route. At compile time the
+pattern has to match the shape of at least one route (`{unknown_route, Pattern}` otherwise), and because
+the value is not known yet it gives a warning (`{dynamic_route_segment, Pattern}`, logged with file and
+line when the router starts); `router_path("/docs/{{ @page }}", #{no_warn => true})` silences it. A route
+with several dynamic segments needs one placeholder each. The options map takes `no_warn`, `query` (a map or
+pairs, appended after `?`) and `router` (the name of another running router to check against). The routes a
+link can match are compiled into the template, so rendering needs no router and works from any process (a
+request, a live page, an agent's task). Routes are static paths today; dynamic routes are on the roadmap.
+
+`weberl_template:compile_source/5` and `compile_file/4` take `#{routes => Table}` for this; without it
+(unit tests of a single template) the route check at compile time is skipped, `weberl_template:warnings/1`
+returns what the compiler warned about, and the router named by `weberl_url:with_router/2` (or the
+`router` option) answers at render time.
 
 ### Conditionals, case and loops
 
@@ -883,7 +950,10 @@ unterminated_interpolation}`; other reasons are `empty_interpolation`,
 `{invalid_expression, Text, Message}`, `{not_a_single_expression, Text}`, `{unbound_variable, Name}`,
 `{reserved_variable, Name}` (names starting `_Weberl_` are the engine's), `unterminated_raw_interpolation`, `{interpolation_in_unsupported_context, Where}`,
 `{interpolation_in_restricted_attribute, Attr}`, `{raw_interpolation_in_attribute,
-Attr}`, `{invalid_utf8, File}`, and for regions `unterminated_block_tag`,
+Attr}`, `{invalid_utf8, File}`, for links `{unknown_route, Path}`, `{unverifiable_route, Helper}`,
+`{not_a_path, Text}`, `{not_a_url, Text}`, `{url_not_allowed_here, Helper, Tag, Attr}`,
+`{misplaced_url_helper, Helper}`, `{untagged_url, Source}`, `{bad_url_option, Key}` and
+`{bad_placeholder, Reason}`, and for regions `unterminated_block_tag`,
 `{invalid_block_tag, Text}`, `{invalid_region_tag, Tag}`, `{unclosed_region, Name}`,
 `{unexpected_region_end, Name}`, `{mismatched_region_end, Open, Got}`,
 `{duplicate_region, Name, FirstLine}`, `{region_in_unsupported_context, Name, Where}`
@@ -1354,7 +1424,8 @@ See `ROADMAP.md` for the running list. Notable points:
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.
-- Interpolation into URL attributes is rejected rather than URL-encoded.
+- Links to routes are verified for static paths only; `srcset`, `data`, `ping` and the other
+  non-URL-helper attributes still reject interpolation.
 - Request `path/1` is the raw path; a decoded variant is future work.
 
 ## Project documents

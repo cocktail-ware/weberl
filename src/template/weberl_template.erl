@@ -18,12 +18,15 @@
 %% Capitalized names are local variables (bound by blocks, which come later).
 %% Everything else is literal. `\{{' writes a literal `{{'. Supported values:
 %% UTF-8 binaries, character lists, integers, floats and atoms (their name).
-%% The tag ends at the first `}}': an expression with two closing braces of its
-%% own needs a space between them. See `weberl_blocks_expr' for the expression
-%% language.
+%% The tag ends at the first `}}' outside the Erlang inside (strings, atoms and brackets
+%% are read, see `weberl_blocks_expr:tag_end/2'). See `weberl_blocks_expr' for the
+%% expression language.
 %%
 %% Interpolation is allowed in HTML text and in quoted attribute values only
-%% (see `weberl_template_html'); other places are rejected at compile time.
+%% (see `weberl_template_html'); other places are rejected at compile time. In a URL
+%% attribute (`href', `src', ...) it has to be a value made by `weberl_url', checked
+%% against the element and, with `compile_source/5' and a route table, against the routes
+%% (see `weberl_template_urls' and the README, "Links").
 %%
 %% == Regions ==
 %% `{: region cart :} ... {: /region cart :}' marks a part of the page the server
@@ -53,12 +56,16 @@
 
 -export([render/2, try_render/2, render_region/3, try_render_region/3, regions/1,
          has_template/1, generated_module/1, layout/1,
-         compile_source/3, compile_source/4, compile_file/2, compile_file/3, parse_layout/1, load/1, compile_and_load_file/2,
+         compile_source/3, compile_source/4, compile_source/5, compile_file/2, compile_file/3, compile_file/4,
+         parse_layout/1, load/1, compile_and_load_file/2, warnings/1,
          discover/1, associate/2]).
--export_type([compiled/0, layout/0]).
+-export_type([compiled/0, layout/0, compile_opts/0]).
 
--opaque compiled() :: {module(), binary(), file:filename_all()}.
+-opaque compiled() :: {module(), binary(), file:filename_all(), [weberl_template_urls:warning()]}.
 -type layout() :: weberl_template_layout:layout().
+%% `routes': the route table links are checked against at compile time (without it the
+%% checks that need the table are skipped, and the render-time check still runs).
+-type compile_opts() :: #{routes => weberl_table:t()}.
 
 %% ---------------------------------------------------------------------------
 %% Rendering
@@ -159,31 +166,52 @@ compile_source(View, Source, File) ->
 -spec compile_source(module(), binary(), file:filename_all(), none | layout()) ->
     {ok, compiled()} | {error, term()}.
 compile_source(View, Source, File, Layout) ->
+    compile_source(View, Source, File, Layout, #{}).
+
+%% @doc Like {@link compile_source/4}, with options (`routes', see `compile_opts()').
+%% Links in URL attributes are checked against the route table when it is given
+%% (HANDOFF.md, decision 9); what the compiler warns about is {@link warnings/1}.
+-spec compile_source(module(), binary(), file:filename_all(), none | layout(), compile_opts()) ->
+    {ok, compiled()} | {error, term()}.
+compile_source(View, Source, File, Layout, Opts) ->
     case unicode:characters_to_binary(Source, utf8, utf8) of
         Source ->
-            compile_utf8(View, Source, File, Layout);
+            compile_utf8(View, Source, File, Layout, Opts);
         _ ->
             {error, {invalid_utf8, File}}
     end.
 
-compile_utf8(View, Source, File, Layout) ->
+compile_utf8(View, Source, File, Layout, Opts) ->
     case weberl_template_lexer:tokenize(Source, File) of
         {ok, Tokens} ->
             case weberl_template_parser:parse(Tokens, File) of
-                {ok, Ast} -> validate_and_compile(View, Ast, File, Layout);
+                {ok, Ast} -> validate_and_compile(View, Ast, File, Layout, Opts);
                 {error, _} = Error -> Error
             end;
         {error, _} = Error ->
             Error
     end.
 
-validate_and_compile(View, Ast, File, Layout) ->
+validate_and_compile(View, Ast, File, Layout, Opts) ->
     case weberl_template_parser:validate(Ast, File) of
         ok ->
             case layout(Layout, Ast, File) of
-                {ok, Full} ->
-                    case weberl_template_compiler:compile(View, Full, File, layout_name(Layout)) of
-                        {ok, Mod, Bin} -> {ok, {Mod, Bin, File}};
+                {ok, Full} -> analyze_and_compile(View, Full, File, Layout, Opts);
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% URL attributes (links are checked, placeholders rewritten), then the locals of what
+%% was rewritten are checked like any others.
+analyze_and_compile(View, Full, File, Layout, Opts) ->
+    case weberl_template_urls:analyze(Full, File, Opts) of
+        {ok, Analyzed, Warnings} ->
+            case weberl_template_parser:check_scope(Analyzed, File) of
+                ok ->
+                    case weberl_template_compiler:compile(View, Analyzed, File, layout_name(Layout)) of
+                        {ok, Mod, Bin} -> {ok, {Mod, Bin, File, Warnings}};
                         {error, _} = Error -> Error
                     end;
                 {error, _} = Error ->
@@ -192,6 +220,11 @@ validate_and_compile(View, Ast, File, Layout) ->
         {error, _} = Error ->
             Error
     end.
+
+%% @doc What the compiler warned about: `{warning, File, Line, Reason}', for example
+%% `{dynamic_route_segment, Pattern}' for a `router_path' with a placeholder.
+-spec warnings(compiled()) -> [weberl_template_urls:warning()].
+warnings({_Mod, _Bin, _File, Warnings}) -> Warnings.
 
 layout_name(none) -> none;
 layout_name(Layout) -> weberl_template_layout:name(Layout).
@@ -215,14 +248,19 @@ compile_file(View, File) ->
 -spec compile_file(module(), file:filename_all(), none | layout()) ->
     {ok, compiled()} | {error, term()}.
 compile_file(View, File, Layout) ->
+    compile_file(View, File, Layout, #{}).
+
+-spec compile_file(module(), file:filename_all(), none | layout(), compile_opts()) ->
+    {ok, compiled()} | {error, term()}.
+compile_file(View, File, Layout, Opts) ->
     case file:read_file(File) of
-        {ok, Source} -> compile_source(View, Source, File, Layout);
+        {ok, Source} -> compile_source(View, Source, File, Layout, Opts);
         {error, Posix} -> {error, {read_failed, File, Posix}}
     end.
 
 %% @doc Load compiled templates, replacing any previous version.
 -spec load(compiled()) -> ok.
-load({Mod, Bin, File}) ->
+load({Mod, Bin, File, _Warnings}) ->
     _ = code:purge(Mod),
     {module, Mod} = code:load_binary(Mod, unicode:characters_to_list(File), Bin),
     ok.

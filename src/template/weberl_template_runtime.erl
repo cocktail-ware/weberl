@@ -15,7 +15,32 @@
 %% untrusted input.
 -module(weberl_template_runtime).
 
--export([assign/3, escaped/3, raw/3, escape/1]).
+-export([assign/3, escaped/3, raw/3, url/4, escape/1]).
+
+%% @doc An interpolation inside a URL attribute (`href', `src', ...): the value has to
+%% be one made by `weberl_url', and its kind has to suit the attribute (HANDOFF
+%% decision 8). `Policy' is `{web | local_only, start | inner}': the element's policy
+%% and whether the interpolation begins the attribute value (a whole URL) or follows
+%% literal text (a part of one). The result is HTML-escaped.
+%%
+%% Raises `{untagged_url, View, Line, Value}' for anything else and
+%% `{unsafe_url, View, Line, Tagged}' for a kind the attribute does not take. The
+%% template compiler finds most of these without rendering.
+-spec url(term(), module(), pos_integer(), {web | local_only, start | inner}) -> binary().
+url({weberl_url, Kind, Bin} = Value, View, Line, {Policy, Position}) when is_atom(Kind), is_binary(Bin) ->
+    case url_kind_allowed(Kind, Policy, Position) of
+        true -> escape(Bin);
+        false -> erlang:error({template_error, {unsafe_url, View, Line, Value}})
+    end;
+url(Value, View, Line, _Policy) ->
+    erlang:error({template_error, {untagged_url, View, Line, Value}}).
+
+%% `unsafe_url' goes anywhere; a part (after literal text) is an encoded piece; a whole
+%% value is a path, or on a `web' attribute also an absolute URL.
+url_kind_allowed(unsafe, _, _) -> true;
+url_kind_allowed(Kind, _, inner) -> Kind =:= component orelse Kind =:= query;
+url_kind_allowed(Kind, web, start) -> lists:member(Kind, [path, url, router_path, router_url]);
+url_kind_allowed(Kind, local_only, start) -> lists:member(Kind, [path, router_path]).
 
 -spec assign(atom(), map(), module()) -> term().
 assign(Name, Assigns, View) ->

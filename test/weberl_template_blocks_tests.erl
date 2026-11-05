@@ -315,8 +315,8 @@ elements_need_not_balance_across_branches_test() ->
     ?assertEqual(<<"<div class=\"x\">text</div>">>, render(T, #{a => false})).
 
 interpolation_inside_blocks_keeps_the_html_rules_test() ->
-    ?assertEqual({1, {interpolation_in_restricted_attribute, <<"href">>}},
-                 err(<<"{: if @a :}<a href=\"{{ @u }}\">x</a>{: /if :}">>)),
+    ?assertEqual({1, {interpolation_in_restricted_attribute, <<"style">>}},
+                 err(<<"{: if @a :}<p style=\"{{ @u }}\">x</p>{: /if :}">>)),
     ?assertEqual(<<"<a title=\"t\">x</a>">>,
                  render(<<"{: for T <- @ts :}<a title=\"{{ T }}\">x</a>{: /for :}">>, #{ts => [t]})).
 

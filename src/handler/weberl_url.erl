@@ -35,6 +35,7 @@
 -export([local/1]).
 -export([ensure_path/1, url/1, component/1, query/1, unsafe_url/1,
          router_path/1, router_path/2, router_url/1, router_url/2]).
+-export([router_path_parts/2, router_url_parts/2, router_path_known/3, router_url_known/3]).
 -export([is_tagged/1, kind/1, data/1]).
 -export([with_router/2, ambient_router/0]).
 -export_type([tagged/0, kind/0]).
@@ -137,6 +138,59 @@ router_url(Path, Opts0) ->
     Opts = check_opts(Opts0),
     Route = route(Path, Opts),
     tag(router_url, with_query(<<(public_url())/binary, Route/binary>>, Opts)).
+
+%% @doc What the template compiler makes of `router_path("/docs/{{ @page }}")': the
+%% literal parts as they are and each placeholder as one percent-encoded segment, so a
+%% value can never add a separator (`a/b' is `a%2Fb'). An empty value raises
+%% `{empty_segment, Value}'. Otherwise as {@link router_path/2}.
+-spec router_path_parts([{lit, binary()} | {seg, term()}], map()) -> tagged().
+router_path_parts(Parts, Opts0) ->
+    Opts = check_opts(Opts0),
+    tag(router_path, with_query(route(join_parts(Parts), Opts), Opts)).
+
+%% @doc Like {@link router_path_parts/2}, as {@link router_url/2}.
+-spec router_url_parts([{lit, binary()} | {seg, term()}], map()) -> tagged().
+router_url_parts(Parts, Opts0) ->
+    Opts = check_opts(Opts0),
+    Route = route(join_parts(Parts), Opts),
+    tag(router_url, with_query(<<(public_url())/binary, Route/binary>>, Opts)).
+
+%% @doc What the template compiler makes of `router_path(...)' when the template is compiled
+%% with the route table: the parts as for {@link router_path_parts/2} and `Known', the
+%% routes (a map `Path => []') the call can match, which the compiler worked out. The
+%% built path must be one of them, else `{unknown_route, Path}'; no router is needed when
+%% rendering, in whichever process that happens (a request, a live session, a task of the
+%% application).
+-spec router_path_known([{lit, binary()} | {seg, term()}], #{binary() => term()}, map()) -> tagged().
+router_path_known(Parts, Known, Opts0) ->
+    Opts = check_opts(Opts0),
+    tag(router_path, with_query(known_route(join_parts(Parts), Known), Opts)).
+
+%% @doc Like {@link router_path_known/3}, as {@link router_url/2}.
+-spec router_url_known([{lit, binary()} | {seg, term()}], #{binary() => term()}, map()) -> tagged().
+router_url_known(Parts, Known, Opts0) ->
+    Opts = check_opts(Opts0),
+    Route = known_route(join_parts(Parts), Known),
+    tag(router_url, with_query(<<(public_url())/binary, Route/binary>>, Opts)).
+
+known_route(Path, Known) ->
+    case weberl_route:normalize_path(unicode:characters_to_list(Path)) of
+        {ok, Normal} ->
+            Bin = unicode:characters_to_binary(Normal),
+            maps:is_key(Bin, Known) orelse fail({unknown_route, Path}),
+            Bin;
+        {error, _} ->
+            fail({unknown_route, Path})
+    end.
+
+join_parts(Parts) -> iolist_to_binary([part(P) || P <- Parts]).
+
+part({lit, Bin}) when is_binary(Bin) -> Bin;
+part({seg, Value}) ->
+    case encode(text(Value)) of
+        <<>> -> fail({empty_segment, Value});
+        Encoded -> Encoded
+    end.
 
 %% ---------------------------------------------------------------------
 %% Tagged values
