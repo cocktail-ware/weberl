@@ -1,13 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>Clock</title>
-    <link rel="stylesheet" href="/static/site.css">
-    <script src="/static/clock.js" defer></script>
-</head>
-<body>
+{: fill head :}<script src="/static/clock.js" defer></script>{: /fill head :}
     <h1>Clock</h1>
     <p>Server time: <span id="time">{{ time }}</span></p>
     <a href="/">Home</a>
-</body>
-</html>

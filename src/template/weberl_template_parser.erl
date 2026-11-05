@@ -15,16 +15,20 @@
 %%       template.</li>
 %%   <li>`{content, Line}': `{: content :}', the place a layout puts the view's
 %%       template (see `weberl_template_layout').</li>
+%%   <li>`{slot, Line, Name, Default}': `{: slot name :}...{: /slot name :}' in a
+%%       layout; `{fill, Line, Name, Children}': `{: fill name :}...{: /fill name :}',
+%%       a top-level block of a view that replaces the layout's slot of that name.</li>
 %% </ul>
 -module(weberl_template_parser).
 
--export([parse/1, parse/2, validate/2, validate_layout/2, variables/1, regions/1]).
+-export([parse/1, parse/2, validate/2, validate_layout/2, validate_content/2, variables/1, regions/1]).
 -export_type([ast/0, ast_node/0]).
 
 -type ast_node() :: {text, pos_integer(), binary()}
               | {var, pos_integer(), atom(), escaped | raw}
               | {region, pos_integer(), atom(), default | binary(), ast()}
-              | {content, pos_integer()}.
+              | {content, pos_integer()}
+              | {slot | fill, pos_integer(), atom(), ast()}.
 -type ast() :: [ast_node()].
 
 -type error() :: {error, {syntax_error, file:filename_all(), pos_integer(), term()}}.
@@ -43,30 +47,62 @@ parse(Tokens, File) ->
         throw:{parse_error, Line, Reason} -> {error, {syntax_error, File, Line, Reason}}
     end.
 
-%% Stack of open regions: {Name, Line, Tag, NodesSoFarReversed}.
+%% Stack of open blocks: {Kind, Name, Line, Tag, NodesSoFarReversed}, Kind being
+%% region, slot or fill. `Seen' remembers every {Kind, Name} opened.
 build([], [], Acc, _Seen) ->
     lists:reverse(Acc);
-build([], [{Name, Line, _, _} | _], _Acc, _Seen) ->
-    throw({parse_error, Line, {unclosed_region, Name}});
+build([], [{Kind, Name, Line, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {event(unclosed, Kind), Name}});
 build([{text, Line, Bin} | T], Stack, Acc, Seen) ->
     build(T, Stack, [{text, Line, Bin} | Acc], Seen);
 build([{interp, Line, Mode, Name} | T], Stack, Acc, Seen) ->
     build(T, Stack, [{var, Line, Name, Mode} | Acc], Seen);
 build([{content, Line} | T], Stack, Acc, Seen) ->
-    build(T, Stack, [{content, Line} | Acc], Seen);
-build([{block_open, Line, region, Name, Opts} | T], Stack, Acc, Seen) ->
+    case [Name || {Kind, Name, _, _, _} <- Stack, Kind =/= region] of
+        [] -> build(T, Stack, [{content, Line} | Acc], Seen);
+        [Name | _] -> throw({parse_error, Line, {content_in_slot, Name}})
+    end;
+build([{block_open, Line, Kind, Name, Opts} | T], Stack, Acc, Seen) ->
     case Seen of
-        #{Name := First} -> throw({parse_error, Line, {duplicate_region, Name, First}});
+        #{{Kind, Name} := First} -> throw({parse_error, Line, {duplicate(Kind), Name, First}});
         _ -> ok
     end,
+    nesting(Kind, Name, Line, Stack),
     Tag = maps:get(tag, Opts, default),
-    build(T, [{Name, Line, Tag, Acc} | Stack], [], Seen#{Name => Line});
-build([{block_close, Line, region, Name} | _], [], _Acc, _Seen) ->
-    throw({parse_error, Line, {unexpected_region_end, Name}});
-build([{block_close, Line, region, Name} | _], [{Open, _, _, _} | _], _Acc, _Seen) when Name =/= Open ->
-    throw({parse_error, Line, {mismatched_region_end, Open, Name}});
-build([{block_close, _, region, Name} | T], [{Name, Line, Tag, Outer} | Stack], Acc, Seen) ->
-    build(T, Stack, [{region, Line, Name, Tag, lists:reverse(Acc)} | Outer], Seen).
+    build(T, [{Kind, Name, Line, Tag, Acc} | Stack], [], Seen#{{Kind, Name} => Line});
+build([{block_close, Line, Kind, Name} | _], [], _Acc, _Seen) ->
+    throw({parse_error, Line, {event(unexpected, Kind), Name}});
+build([{block_close, Line, Kind, Name} | _], [{Kind, Open, _, _, _} | _], _Acc, _Seen)
+  when Name =/= Open ->
+    throw({parse_error, Line, {event(mismatched, Kind), Open, Name}});
+build([{block_close, Line, Kind, Name} | _], [{Other, Open, _, _, _} | _], _Acc, _Seen)
+  when Kind =/= Other ->
+    throw({parse_error, Line, {mismatched_block_end, {Other, Open}, {Kind, Name}}});
+build([{block_close, _, Kind, Name} | T], [{Kind, Name, Line, Tag, Outer} | Stack], Acc, Seen) ->
+    build(T, Stack, [node(Kind, Line, Name, Tag, lists:reverse(Acc)) | Outer], Seen).
+
+node(region, Line, Name, Tag, Children) -> {region, Line, Name, Tag, Children};
+node(slot, Line, Name, _Tag, Children) -> {slot, Line, Name, Children};
+node(fill, Line, Name, _Tag, Children) -> {fill, Line, Name, Children}.
+
+%% A fill is a top-level block of a view; a slot may be inside a region of the
+%% layout but not inside another slot (or a fill).
+nesting(fill, Name, Line, [_ | _]) ->
+    throw({parse_error, Line, {fill_not_top_level, Name}});
+nesting(slot, Name, Line, Stack) ->
+    case [K || {K, _, _, _, _} <- Stack, K =/= region] of
+        [] -> ok;
+        _ -> throw({parse_error, Line, {slot_in_slot, Name}})
+    end;
+nesting(_, _, _, _) ->
+    ok.
+
+duplicate(region) -> duplicate_region;
+duplicate(slot) -> duplicate_slot;
+duplicate(fill) -> duplicate_fill.
+
+event(Event, Kind) -> list_to_atom(atom_to_list(Event) ++ "_" ++ atom_to_list(Kind)
+                                   ++ case Event of unclosed -> ""; _ -> "_end" end).
 
 %% @doc Reject interpolation in unsupported HTML contexts, and regions that do
 %% not begin and end in HTML text. `{: content :}' is an error here: only a
@@ -82,6 +118,21 @@ validate(Ast, File) ->
     ok | {error, {syntax_error, file:filename_all(), pos_integer(), term()}}.
 validate_layout(Ast, File) ->
     check(Ast, File, layout).
+
+%% @doc The part of a view that goes into a layout's `{: content :}' (the view
+%% without its fills) has to end in HTML text, or it would leave a tag open in the
+%% layout. Reported at the line of its last node.
+-spec validate_content(ast(), file:filename_all()) ->
+    ok | {error, {syntax_error, file:filename_all(), pos_integer(), term()}}.
+validate_content(Ast, File) ->
+    case walk(Ast, weberl_template_html:initial(), {File, view}) of
+        {ok, text} -> ok;
+        {ok, Ctx} -> {error, {syntax_error, File, last_line(Ast), {content_unbalanced_markup, context_name(Ctx)}}};
+        {error, _} = Error -> Error
+    end.
+
+last_line([]) -> 1;
+last_line(Ast) -> element(2, lists:last(Ast)).
 
 check(Ast, File, Mode) ->
     case walk(Ast, weberl_template_html:initial(), {File, Mode}) of
@@ -104,6 +155,24 @@ walk([{content, Line} | Rest], Ctx, {File, layout} = Env) ->
     case Ctx of
         text -> walk(Rest, Ctx, Env);
         _ -> {error, {syntax_error, File, Line, {content_in_unsupported_context, context_name(Ctx)}}}
+    end;
+walk([{slot, Line, Name, _} | _], _Ctx, {File, view}) ->
+    {error, {syntax_error, File, Line, {slot_outside_layout, Name}}};
+walk([{fill, Line, Name, _} | _], _Ctx, {File, layout}) ->
+    {error, {syntax_error, File, Line, {fill_in_layout, Name}}};
+walk([{Kind, Line, Name, Children} | Rest], Ctx, {File, _} = Env) when Kind =:= slot; Kind =:= fill ->
+    %% like a region: begins in text and has to end in text
+    case Ctx of
+        text ->
+            case walk(Children, weberl_template_html:initial(), Env) of
+                {ok, text} -> walk(Rest, Ctx, Env);
+                {ok, _Other} ->
+                    {error, {syntax_error, File, Line, {unbalanced_markup, Kind, Name}}};
+                {error, _} = Error ->
+                    Error
+            end;
+        _ ->
+            {error, {syntax_error, File, Line, {in_unsupported_context, Kind, Name, context_name(Ctx)}}}
     end;
 walk([{region, Line, Name, _Tag, Children} | Rest], Ctx, {File, _} = Env) ->
     case Ctx of
@@ -136,6 +205,7 @@ variables(Ast) ->
 vars(Ast) ->
     lists:flatmap(fun({var, _, Name, _}) -> [Name];
                      ({region, _, _, _, Children}) -> vars(Children);
+                     ({Slot, _, _, Children}) when Slot =:= slot; Slot =:= fill -> vars(Children);
                      (_) -> []
                   end, Ast).
 
@@ -148,5 +218,7 @@ regions(Ast) ->
       fun({region, Line, Name, Tag, Children}, Acc) ->
               maps:merge(Acc#{Name => #{tag => Tag, line => Line, variables => variables(Children)}},
                          regions(Children));
+         ({Slot, _, _, Children}, Acc) when Slot =:= slot; Slot =:= fill ->
+              maps:merge(Acc, regions(Children));
          (_, Acc) -> Acc
       end, #{}, Ast).

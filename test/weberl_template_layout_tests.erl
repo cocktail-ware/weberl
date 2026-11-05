@@ -122,6 +122,112 @@ duplicate_region_across_files_test() ->
     end).
 
 %% ---------------------------------------------------------------------
+%% slots and fills
+
+slot_layout() ->
+    <<"<head>{: slot head :}<title>default</title>{: /slot head :}</head>"
+      "<body>{: content :}{: slot foot :}{: /slot foot :}</body>">>.
+
+slots_lexer_test_() ->
+    [?_assertEqual({ok, [{block_open, 1, slot, head, #{}}, {block_close, 1, slot, head},
+                         {block_open, 1, fill, head, #{}}, {block_close, 1, fill, head}]},
+                   weberl_template_lexer:tokenize(
+                     <<"{: slot head :}{: /slot head :}{: fill head :}{: /fill head :}">>, "t.weberl")),
+     ?_assertEqual({error, {syntax_error, "t.weberl", 1, {invalid_block_tag, <<" slot content ">>}}},
+                   weberl_template_lexer:tokenize(<<"{: slot content :}">>, "t.weberl")),
+     ?_assertEqual({error, {syntax_error, "t.weberl", 1, {invalid_block_tag, <<" fill Head ">>}}},
+                   weberl_template_lexer:tokenize(<<"{: fill Head :}">>, "t.weberl"))].
+
+default_and_filled_slot_test() ->
+    with_tmp(fun(Dir) ->
+        L = layout(Dir, slot_layout()),
+        Plain = compile(L, <<"<p>hi</p>">>),
+        ?assertEqual(<<"<head><title>default</title></head><body><p>hi</p></body>">>,
+                     bin(weberl_template:render(Plain, #{}))),
+        Filled = compile(L, <<"{: fill head :}<title>{{ t }}</title>{: /fill head :}<p>hi</p>"
+                              "{: fill foot :}<i>{{ n }}</i>{: /fill foot :}">>),
+        ?assertEqual(<<"<head><title>T</title></head><body><p>hi</p><i>1</i></body>">>,
+                     bin(weberl_template:render(Filled, #{t => <<"T">>, n => 1})))
+    end).
+
+only_fills_test() ->
+    with_tmp(fun(Dir) ->
+        L = layout(Dir, slot_layout()),
+        V = compile(L, <<"{: fill head :}H{: /fill head :}">>),
+        ?assertEqual(<<"<head>H</head><body></body>">>, bin(weberl_template:render(V, #{})))
+    end).
+
+replaced_default_needs_no_variables_test() ->
+    with_tmp(fun(Dir) ->
+        L = layout(Dir, <<"{: slot s :}{{ d }}{: /slot s :}{: content :}">>),
+        V = compile(L, <<"{: fill s :}x{: /fill s :}">>),
+        ?assertEqual(<<"x">>, bin(weberl_template:render(V, #{}))),
+        ?assertEqual([], maps:get(variables, (generated(V)):info())),
+        P = compile(L, <<"y">>),
+        ?assertEqual([d], maps:get(variables, (generated(P)):info()))
+    end).
+
+slot_inside_layout_region_test() ->
+    with_tmp(fun(Dir) ->
+        L = layout(Dir, <<"{: region bar :}{: slot s :}d{: /slot s :}{: /region bar :}{: content :}">>),
+        V = compile(L, <<"{: fill s :}{{ x }}{: /fill s :}">>),
+        ?assertEqual(<<"v">>, bin(weberl_template:render_region(V, bar, #{x => <<"v">>})))
+    end).
+
+region_in_fill_test() ->
+    with_tmp(fun(Dir) ->
+        L = layout(Dir, <<"{: slot s :}{: /slot s :}{: content :}">>),
+        V = compile(L, <<"{: fill s :}{: region r :}{{ x }}{: /region r :}{: /fill s :}">>),
+        {ok, #{r := #{variables := [x]}}} = weberl_template:regions(V),
+        ?assertEqual(<<"1">>, bin(weberl_template:render_region(V, r, #{x => 1})))
+    end).
+
+slot_errors_test() ->
+    with_tmp(fun(Dir) ->
+        L = layout(Dir, slot_layout()),
+        E = fun(Line, Reason) -> {error, {syntax_error, "page.weberl", Line, Reason}} end,
+        ?assertEqual(E(1, {unknown_fill, nope, filename:join(Dir, "main.weberl")}),
+                     compile(L, <<"{: fill nope :}x{: /fill nope :}">>)),
+        ?assertEqual(E(1, {duplicate_fill, head, 1}),
+                     compile(L, <<"{: fill head :}{: /fill head :}{: fill head :}{: /fill head :}">>)),
+        ?assertEqual(E(1, {fill_not_top_level, head}),
+                     compile(L, <<"{: region r :}{: fill head :}{: /fill head :}{: /region r :}">>)),
+        ?assertEqual(E(1, {unclosed_fill, head}), compile(L, <<"{: fill head :}">>)),
+        ?assertEqual(E(1, {mismatched_fill_end, head, foot}),
+                     compile(L, <<"{: fill head :}{: /fill foot :}">>)),
+        ?assertEqual(E(1, {mismatched_block_end, {fill, head}, {region, head}}),
+                     compile(L, <<"{: fill head :}{: /region head :}">>)),
+        ?assertEqual(E(1, {unbalanced_markup, fill, head}),
+                     compile(L, <<"{: fill head :}<div{: /fill head :}">>)),
+        ?assertEqual(E(1, {content_unbalanced_markup, tag}), compile(L, <<"<div ">>)),
+        ?assertEqual(E(1, {slot_outside_layout, head}),
+                     compile(L, <<"{: slot head :}{: /slot head :}">>)),
+        ?assertEqual(E(1, {interpolation_in_unsupported_context, <<"script">>}),
+                     compile(L, <<"{: fill head :}<script>{{ x }}</script>{: /fill head :}">>))
+    end).
+
+standalone_template_errors_test() ->
+    E = fun(Src) -> weberl_template:compile_source(unique(), Src, "t.weberl") end,
+    ?assertEqual({error, {syntax_error, "t.weberl", 1, {fill_without_layout, a}}},
+                 E(<<"{: fill a :}{: /fill a :}">>)),
+    ?assertEqual({error, {syntax_error, "t.weberl", 1, {slot_outside_layout, a}}},
+                 E(<<"{: slot a :}{: /slot a :}">>)).
+
+layout_file_slot_errors_test_() ->
+    [?_assertMatch({error, {syntax_error, _, 1, {slot_in_slot, b}}},
+                   layout_error(<<"{: slot a :}{: slot b :}{: /slot b :}{: /slot a :}{: content :}">>)),
+     ?_assertMatch({error, {syntax_error, _, 1, {content_in_slot, a}}},
+                   layout_error(<<"{: slot a :}{: content :}{: /slot a :}">>)),
+     ?_assertMatch({error, {syntax_error, _, 1, {duplicate_slot, a, 1}}},
+                   layout_error(<<"{: slot a :}{: /slot a :}{: slot a :}{: /slot a :}{: content :}">>)),
+     ?_assertMatch({error, {syntax_error, _, 1, {fill_in_layout, a}}},
+                   layout_error(<<"{: content :}{: fill a :}{: /fill a :}">>)),
+     ?_assertMatch({error, {syntax_error, _, 1, {in_unsupported_context, slot, a, _}}},
+                   layout_error(<<"<div class=\"{: slot a :}{: /slot a :}\">{: content :}">>)),
+     ?_assertMatch({error, {syntax_error, _, 1, {unbalanced_markup, slot, a}}},
+                   layout_error(<<"{: slot a :}<b{: /slot a :}{: content :}">>))].
+
+%% ---------------------------------------------------------------------
 %% selection by metadata, through a router
 
 ensure_records() ->

@@ -3,14 +3,16 @@
 -behaviour(weberl_handler).
 -weberl_page(one_way).
 
--export([handle/1]).
+-export([handle/1, weberl_metadata/0]).
+
+weberl_metadata() -> #{layout => main}.
 
 handle(Request) ->
     %% The page id identifies this page's live session. Hand it to whatever
     %% will push updates; here a small process that ticks until the page is gone.
     PageId = weberl_request:page(Request),
     spawn(fun() -> tick(PageId) end),
-    weberl_response:html(200, weberl_template:render(?MODULE, #{time => timestamp()})).
+    weberl_response:html(200, weberl_template:render(?MODULE, #{title => <<"Clock">>, time => timestamp()})).
 
 tick(PageId) ->
     timer:sleep(1000),

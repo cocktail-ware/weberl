@@ -168,7 +168,11 @@ validate_and_compile(View, Ast, File, Layout) ->
             Error
     end.
 
-layout(none, Ast, _File) -> {ok, Ast};
+layout(none, Ast, File) ->
+    case [{L, N} || {fill, L, N, _} <- Ast] of
+        [] -> {ok, Ast};
+        [{Line, Name} | _] -> {error, {syntax_error, File, Line, {fill_without_layout, Name}}}
+    end;
 layout(Layout, Ast, File) -> weberl_template_layout:compose(Layout, Ast, File).
 
 %% @doc Read, parse and validate a layout file (once; use the result for every

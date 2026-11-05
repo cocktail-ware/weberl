@@ -12,11 +12,13 @@
 -behaviour(weberl_handler).
 -weberl_page(two_way).
 
--export([handle/1, handle_request/3]).
+-export([handle/1, handle_request/3, weberl_metadata/0]).
+
+weberl_metadata() -> #{layout => main}.
 
 handle(Request) ->
     PageId = weberl_request:page(Request),
-    ViewData = weberl_view_data:new(#{count => 0, time => timestamp()},
+    ViewData = weberl_view_data:new(#{title => <<"Counter">>, count => 0, time => timestamp()},
                                     #{opened => erlang:system_time(second)}),
     spawn(fun() -> tick(PageId) end),
     %% Render the template and keep the view data in the page's session.

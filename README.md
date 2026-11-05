@@ -459,6 +459,8 @@ beside it is an error at router start (`{unassociated_templates, Files}`).
 | `{: region name :}` ... `{: /region name :}` | a [region](#regions) |
 | `{: region name tag=tbody :}` | a region wrapped in that element |
 | `{: content :}` | in a [layout](#layouts): where the view's template goes |
+| `{: slot name :}` ... `{: /slot name :}` | in a layout: a [slot](#slots) a view can fill; the body is the default |
+| `{: fill name :}` ... `{: /fill name :}` | in a view: replaces the layout's slot of that name |
 | `\{:` | literal `{:` |
 
 `{{ }}` is for values only; statements use `{: :}`. Names match `[a-z][a-zA-Z0-9_]*` and are looked up as atom keys in the assigns
@@ -563,6 +565,43 @@ Where}`); `{duplicate_layouts, [{Name, Files}]}`; and in `{invalid_templates, [{
 Reason}]}`: `{unknown_layout, Name}`, `layout_without_template` (the metadata asks for a
 layout but the view has no template), `content_outside_layout` (a view or a standalone
 template uses `{: content :}`) and `{duplicate_region, Name, LayoutFile, ViewFile}`.
+
+#### Slots
+
+`{: content :}` is where the body of the view goes. For other parts of the page (scripts and
+styles in `<head>`, a sidebar) the layout declares slots, and the view fills the ones it wants:
+
+```html
+<!-- layout -->
+<head>
+  <title>{{ title }}</title>
+  {: slot head :}{: /slot head :}
+</head>
+<body>{: content :}</body>
+
+<!-- view -->
+{: fill head :}<script src="/static/clock.js" defer></script>{: /fill head :}
+<h1>Clock</h1>
+```
+
+A slot's body is its default, used when the view does not fill it (it may be empty, as above).
+A fill is a top-level block of the view and replaces the slot of the same name; everything in
+the view outside its fills goes to `{: content :}`. Slots and fills are named like regions
+(`content` is reserved), are used once per file, and, like regions, start and end in HTML
+text. A slot may stand inside a layout region, but not inside another slot; a fill cannot
+nest in anything. A region may be inside a fill or a slot default; as for all regions, a name
+is used once in the composed template. Variables of a default that a fill replaces are not
+needed. The part of the view that goes into `{: content :}` has to end in HTML text too,
+so it cannot leave a tag open in the layout.
+
+Compile errors (all `{syntax_error, File, Line, Reason}`): `{unknown_fill, Name, LayoutFile}`,
+`{fill_without_layout, Name}`, `{slot_outside_layout, Name}`, `{fill_in_layout, Name}`,
+`{fill_not_top_level, Name}`, `{slot_in_slot, Name}`, `{content_in_slot, Name}`,
+`{duplicate_slot, Name, FirstLine}`, `{duplicate_fill, Name, FirstLine}`,
+`{unbalanced_markup, slot | fill, Name}`, `{in_unsupported_context, slot | fill, Name, Where}`,
+`{content_unbalanced_markup, Where}` and, for unclosed or mismatched blocks,
+`{unclosed_slot, Name}`, `{unexpected_fill_end, Name}`, `{mismatched_slot_end, Open, Got}` and
+`{mismatched_block_end, {Kind, Open}, {Kind, Got}}` (a `/region` closing a slot, say).
 
 ### Compile errors
 
@@ -1034,7 +1073,7 @@ See `ROADMAP.md` for the running list. Notable points:
 - A router process killed without cleanup leaves its listener serving until the
   same router name is started again.
 - No dynamic or wildcard routes, middleware execution, authentication,
-  named slots or nested layouts, components, loops or conditionals in templates, and no hot reloading.
+  nested layouts, components, loops or conditionals in templates, and no hot reloading.
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.

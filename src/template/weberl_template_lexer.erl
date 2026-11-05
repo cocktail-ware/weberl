@@ -13,6 +13,8 @@
 %%       `{: region name [tag=element] :}'</li>
 %%   <li>`{block_close, Line, region, Name}' for `{: /region name :}'</li>
 %% </ul>
+%% `{block_open, Line, slot | fill, Name, #{}}' and `{block_close, Line, slot | fill, Name}' for
+%% `{: slot name :}' and `{: fill name :}' (names as for regions, but not `content'),
 %% and `{content, Line}' for `{: content :}' (where a layout puts the view's
 %% template). `\{:' is a literal `{:'. Errors:
 %% `{error, {syntax_error, File, Line, Reason}}' with Reason
@@ -26,8 +28,8 @@
 
 -type token() :: {text, pos_integer(), binary()}
                | {interp, pos_integer(), escaped | raw, atom()}
-               | {block_open, pos_integer(), region, atom(), #{tag => binary()}}
-               | {block_close, pos_integer(), region, atom()}
+               | {block_open, pos_integer(), region | slot | fill, atom(), #{tag => binary()}}
+               | {block_close, pos_integer(), region | slot | fill, atom()}
                | {content, pos_integer()}.
 
 -spec tokenize(binary(), file:filename_all()) ->
@@ -94,6 +96,14 @@ block_token(Content, Line) ->
             {content, Line};
         [<<"/region">>, Name] ->
             {block_close, Line, region, block_name(Name, Content, Line)};
+        [<<"slot">>, Name] ->
+            {block_open, Line, slot, slot_name(Name, Content, Line), #{}};
+        [<<"fill">>, Name] ->
+            {block_open, Line, fill, slot_name(Name, Content, Line), #{}};
+        [<<"/slot">>, Name] ->
+            {block_close, Line, slot, slot_name(Name, Content, Line)};
+        [<<"/fill">>, Name] ->
+            {block_close, Line, fill, slot_name(Name, Content, Line)};
         _ ->
             throw({lex_error, Line, {invalid_block_tag, Content}})
     end.
@@ -102,6 +112,13 @@ block_name(Name, Content, Line) ->
     case re:run(Name, "^[a-z][a-zA-Z0-9_]*$", [{capture, none}]) of
         match -> binary_to_atom(Name, utf8);
         nomatch -> throw({lex_error, Line, {invalid_block_tag, Content}})
+    end.
+
+%% Slot names are block names, except `content', which is `{: content :}'.
+slot_name(Name, Content, Line) ->
+    case block_name(Name, Content, Line) of
+        content -> throw({lex_error, Line, {invalid_block_tag, Content}});
+        Atom -> Atom
     end.
 
 %% `tag=tbody': the element that wraps the region instead of `weberl-region'.

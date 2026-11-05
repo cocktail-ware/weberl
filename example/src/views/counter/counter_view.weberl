@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>Counter</title>
-    <link rel="stylesheet" href="/static/site.css">
-    <script src="/static/counter.js" defer></script>
-</head>
-<body>
+{: fill head :}<script src="/static/counter.js" defer></script>{: /fill head :}
     <h1>Counter</h1>
     <p>Server time:
         {: region clock :}<span id="time">{{ time }}</span>{: /region clock :}
@@ -16,5 +9,3 @@
     </p>
     <p>Open for <span id="age">?</span> seconds (asked from the server's private view data)</p>
     <a href="/">Home</a>
-</body>
-</html>

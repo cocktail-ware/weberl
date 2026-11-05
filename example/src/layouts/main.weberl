@@ -3,6 +3,7 @@
 <head>
     <title>{{ title }}</title>
     <link rel="stylesheet" href="/static/site.css">
+    {: slot head :}{: /slot head :}
 </head>
 <body>
 {: content :}
