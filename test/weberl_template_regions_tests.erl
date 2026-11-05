@@ -31,7 +31,7 @@ lexer_test_() ->
      ?_assertEqual({ok, [{block_open, 1, region, a, #{}}, {text, 3, <<"\n">>}, {interp, 4, escaped, <<" @x ">>}]},
                    lex(<<"{: region\n a\n :}\n{{ @x }}">>)),
      ?_assertEqual(E(1, unterminated_block_tag), lex(<<"{: region a">>)),
-     ?_assertEqual(E(1, {invalid_block_tag, <<" if x ">>}), lex(<<"{: if x :}">>)),
+     ?_assertEqual(E(1, {invalid_block_tag, <<" unless x ">>}), lex(<<"{: unless x :}">>)),
      ?_assertEqual(E(1, {invalid_block_tag, <<" region ">>}), lex(<<"{: region :}">>)),
      ?_assertEqual(E(1, {invalid_block_tag, <<" region Cart ">>}), lex(<<"{: region Cart :}">>)),
      ?_assertEqual(E(1, {invalid_block_tag, <<" region a color=red ">>}),

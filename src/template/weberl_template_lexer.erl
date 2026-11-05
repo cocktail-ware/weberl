@@ -20,10 +20,17 @@
 %% `{block_open, Line, slot | fill, Name, #{}}' and `{block_close, Line, slot | fill, Name}' for
 %% `{: slot name :}' and `{: fill name :}' (names as for regions, but not `content'),
 %% and `{content, Line}' for `{: content :}' (where a layout puts the view's
-%% template). `\{:' is a literal `{:'. Errors:
+%% template). `\{:' is a literal `{:'.
+%%
+%% Statements: `{stmt, Line, Kind, Text, TextLine}' for `{: if Expr :}',
+%% `{: elif Expr :}', `{: case Expr :}', `{: of Clause :}', `{: for Qualifiers :}'
+%% (`Text' is the Erlang text as written, `TextLine' the line it starts on; the tag
+%% ends at the first `:}') and, with `Text' `none', `{: else :}' and `{: empty :}';
+%% `{stmt_end, Line, if | case | for}' for `{: /if :}', `{: /case :}', `{: /for :}'.
+%% Errors:
 %% `{error, {syntax_error, File, Line, Reason}}' with Reason
 %% `unterminated_interpolation | unterminated_raw_interpolation |
-%% unterminated_block_tag | empty_interpolation |
+%% unterminated_block_tag | empty_interpolation | {missing_expression, Kind} |
 %% {invalid_block_tag, Text} | {invalid_region_tag, Tag}'.
 -module(weberl_template_lexer).
 
@@ -34,6 +41,9 @@
                | {interp, pos_integer(), escaped | raw, binary()}
                | {block_open, pos_integer(), region | slot | fill, atom(), #{tag => binary()}}
                | {block_close, pos_integer(), region | slot | fill, atom()}
+               | {stmt, pos_integer(), 'if' | elif | 'case' | 'of' | 'for' | 'else' | empty,
+                  binary() | none, pos_integer()}
+               | {stmt_end, pos_integer(), 'if' | 'case' | 'for'}
                | {content, pos_integer()}.
 
 -spec tokenize(binary(), file:filename_all()) ->
@@ -92,6 +102,57 @@ block(Rest, Line, Acc) ->
     end.
 
 block_token(Content, Line) ->
+    Trimmed = string:trim(Content, leading, " \t\r\n"),
+    case statement(Trimmed, Content, Line) of
+        {ok, Token} -> Token;
+        none -> region_token(Content, Line)
+    end.
+
+%% Statements (`if', `case', `for' and their parts): the keyword, then the
+%% Erlang text as written. The keyword has to be followed by white space.
+statement(Trimmed, Content, Line) ->
+    %% the text keeps the white space after the keyword, so its lines are counted right
+    {Word, Rest} = case binary:match(Trimmed, [<<" ">>, <<"\t">>, <<"\r">>, <<"\n">>]) of
+                       {Pos, _} -> {binary:part(Trimmed, 0, Pos),
+                                    binary:part(Trimmed, Pos, byte_size(Trimmed) - Pos)};
+                       nomatch -> {Trimmed, <<>>}
+                   end,
+    %% the text starts on the line of the keyword (its own newlines are counted
+    %% when the Erlang text is scanned)
+    TextLine = Line + count_newlines(binary:part(Content, 0, byte_size(Content) - byte_size(Trimmed))),
+    case Word of
+        <<"if">> -> with_text('if', Rest, Line, TextLine);
+        <<"elif">> -> with_text(elif, Rest, Line, TextLine);
+        <<"case">> -> with_text('case', Rest, Line, TextLine);
+        <<"of">> -> with_text('of', Rest, Line, TextLine);
+        <<"for">> -> with_text('for', Rest, Line, TextLine);
+        <<"else">> -> bare('else', Rest, Content, Line);
+        <<"empty">> -> bare(empty, Rest, Content, Line);
+        <<"/if">> -> closer('if', Rest, Content, Line);
+        <<"/case">> -> closer('case', Rest, Content, Line);
+        <<"/for">> -> closer('for', Rest, Content, Line);
+        _ -> none
+    end.
+
+with_text(Kind, Rest, Line, TextLine) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> -> throw({lex_error, Line, {missing_expression, Kind}});
+        _ -> {ok, {stmt, Line, Kind, Rest, TextLine}}
+    end.
+
+bare(Kind, Rest, Content, Line) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> -> {ok, {stmt, Line, Kind, none, Line}};
+        _ -> throw({lex_error, Line, {invalid_block_tag, Content}})
+    end.
+
+closer(Kind, Rest, Content, Line) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> -> {ok, {stmt_end, Line, Kind}};
+        _ -> throw({lex_error, Line, {invalid_block_tag, Content}})
+    end.
+
+region_token(Content, Line) ->
     Words = binary:split(string:trim(Content, both, " \t\r\n"), [<<" ">>, <<"\t">>, <<"\r">>, <<"\n">>],
                          [global, trim_all]),
     case Words of

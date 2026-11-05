@@ -620,6 +620,9 @@ beside it is an error at router start (`{unassociated_templates, Files}`).
 | `{{ Expr }}` | any Erlang expression, HTML-escaped: `{{ @n + 1 }}`, `{{ string:uppercase(@name) }}` |
 | `{{{ Expr }}}` | the same, **not** escaped. Unsafe for untrusted input |
 | `\{{` | literal `{{` |
+| `{: if Expr :}` ... `{: elif Expr :}` ... `{: else :}` ... `{: /if :}` | a [conditional](#conditionals-case-and-loops) |
+| `{: case Expr :}` `{: of Pattern :}` ... `{: /case :}` | match a value, binding variables |
+| `{: for Qualifiers :}` ... `{: empty :}` ... `{: /for :}` | a loop (an Erlang comprehension) |
 | `{: region name :}` ... `{: /region name :}` | a [region](#regions) |
 | `{: region name tag=tbody :}` | a region wrapped in that element |
 | `{: content :}` | in a [layout](#layouts): where the view's template goes |
@@ -631,11 +634,11 @@ beside it is an error at router start (`{unassociated_templates, Files}`).
 the only way to read an assign is `@name` (`[a-z][a-zA-Z0-9_]*`, looked up as an atom key in the
 assigns map; a missing one is `{missing_variable, View, Name}`). There is **no shorthand**: a bare
 `{{ name }}` is the atom `name` and renders as the text `name`. Capitalized names are local variables,
-which will be bound by blocks (a local that nothing binds is a compile error, `{unbound_variable,
-Name}`). An `@` inside a string, a quoted atom, a character literal or a comment is just text.
-Expressions are developer code, evaluated on every render (and every region re-render): keep them pure
-and cheap. User input is rendered, never evaluated. There are no conditionals, loops, includes,
-components or filters in this version.
+bound by the [blocks](#conditionals-case-and-loops) (a local that nothing binds is a compile error,
+`{unbound_variable, Name}`). An `@` inside a string, a quoted atom, a character literal or a comment is
+just text. Expressions are developer code, evaluated on every render (and every region re-render): keep
+them pure and cheap. User input is rendered, never evaluated. There are no includes, components or
+filters in this version.
 
 The tag ends at the first `}}` (`}}}` for the raw form), so two closing braces of the expression itself
 need a space between them: `{{ maps:get(k, #{k => #{j => 1} }) }}`. Expressions may span lines; a
@@ -652,6 +655,75 @@ are rejected when the template is compiled: inside `<script>` / `<style>`, HTML
 comments, tags, attribute names, unquoted attribute values, raw `{{{ }}}` inside
 an attribute, and URL or code attributes (`href`, `src`, `action`, `style`, `on*`
 and similar). Literal values in those places are of course fine.
+
+### Conditionals, case and loops
+
+Blocks take Erlang: conditions, patterns and generators are Erlang expressions, with assigns written
+`@name` and the variables they bind written as Erlang variables (`Name`).
+
+```html
+<nav>
+{: if @user =/= undefined andalso @role =:= admin :}
+  <a href="/admin">Admin</a>
+{: elif @user =/= undefined :}
+  <a href="/account">Account</a>
+{: else :}
+  <a href="/login">Log in</a>
+{: /if :}
+</nav>
+
+{: case @flash :}
+{: of undefined :}
+{: of {error, Msg} :}<p class="flash error">{{ Msg }}</p>
+{: of {info, Msg} when is_binary(Msg) :}<p class="flash">{{ Msg }}</p>
+{: /case :}
+
+<ul>
+{: for #{name := Name, active := true} <- @agents :}
+  <li>{{ Name }}</li>
+{: empty :}
+  <li>No agents yet</li>
+{: /for :}
+</ul>
+```
+
+- **`if`**: `{: if Expr :}`, any number of `{: elif Expr :}`, an optional `{: else :}`, closed by
+  `{: /if :}`. A condition must be exactly `true` or `false`; anything else raises
+  `{not_boolean, View, Line, Value}` (no truthiness: an optional value is passed as `undefined` and tested
+  with `@error =/= undefined`, or matched with `case`). Only the taken branch is evaluated.
+- **`case`**: `{: case Expr :}` and one or more `{: of Pattern [when Guard] :}` branches. Between `case` and
+  the first `of` only white space is allowed (`content_before_first_of`). A value no branch matches raises
+  `{case_clause, View, Line, Value}`; end with `{: of _ :}` to opt out. A guard cannot call a function, so
+  the assigns the guards read (`when N > @limit`) are fetched once before the `case`: a missing one is an
+  error even if an earlier branch would have matched.
+- **`for`**: what Erlang allows after `||` in a comprehension: generators (`X <- List`, `K := V <- Map`,
+  `<<C>> <= Binary`), filters (`X > @min`) and several of them. A generator pattern that does not match
+  skips that element (Erlang's rule, so `#{active := true} <- @agents` filters). `{: empty :}` renders when
+  nothing came out (after filtering). Order of a map's iteration is Erlang's.
+- **Scope**: names bound by a pattern or generator exist only in their branch or body. Binding a name that is
+  already bound is an error (`{rebound_variable, Name}`); siblings may reuse a name; using an unbound one is
+  `{unbound_variable, Name}`. Capitalized names in `{{ Name }}` read these variables.
+- **Where they may stand**: only in HTML text (not in a tag, an attribute value, `<script>`, `<style>` or a
+  comment: `{block_in_unsupported_context, Kind, Where}`); every branch and body has to end in text, so a tag
+  cannot stay open across a branch (`{block_unbalanced_markup, Kind}`). Elements themselves are not matched
+  across branches, as in a region: keep them balanced. Blocks nest, and may contain regions.
+- **Regions and blocks**: a region may stand in a branch, and may contain blocks; its variables are the
+  assigns they read. `render_region/3` renders only the region's content, not the surrounding condition, so
+  **a conditional is only live inside a region**: wrap it (`{: region nav :}{: if ... :}...{: /region nav :}`)
+  and a change of `user` re-renders the whole `nav`; an `if` outside any region is rendered once. A region
+  cannot use a variable bound outside it (it renders alone: `{region_uses_outer_variable, Region, Name}`) and
+  cannot stand in the body of a `for` (`{region_in_for, Region}`; the `empty` branch is fine).
+- **Layouts**: `{: content :}` and `{: slot :}` may stand inside `if` and `case` branches of a layout (still one
+  `content`), not inside a `for` (`content_in_for`, `{slot_in_for, Name}`); `{: fill :}` stays at the top level
+  of a view. A view put inside a layout branch that binds a name the view binds too is an error after
+  composition.
+- Output is literal: block tags leave their line breaks behind, nothing is trimmed. Keywords need white space
+  after them (`{: if @a :}`, not `{: if(@a) :}`); a tag ends at the first `:}`; closing tags carry no name.
+- Block structure errors: `{unclosed_block, Kind}`, `{unexpected_block_end, Kind}`,
+  `{mismatched_block_end, Open, Got}`, `{misplaced_block_tag, Tag}` (`else`, `elif`, `of`, `empty` outside
+  their block, twice, or after `else`), `case_without_of`, `{missing_expression, Kind}`.
+
+Expressions are developer code, run on every render and region re-render: keep them pure and cheap.
 
 ### Rendering
 

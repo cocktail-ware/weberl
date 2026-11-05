@@ -65,11 +65,14 @@ forms(Mod, View, Ast, File, Layout) ->
      {function, 1, info, 0, [{clause, 1, [], [], [erl_parse:abstract(Info)]}]},
      {eof, 1}].
 
-%% Every region (also the nested ones) with its content.
+%% Every region (also the nested ones, and those inside blocks) with its content.
 region_nodes(Ast) ->
-    lists:flatmap(fun({region, Line, Name, _Tag, Children}) ->
-                          [{Name, Line, Children} | region_nodes(Children)];
-                     (_) -> []
+    lists:flatmap(fun(Node) ->
+                          Inner = lists:flatmap(fun region_nodes/1, weberl_template_parser:children(Node)),
+                          case Node of
+                              {region, Line, Name, _Tag, Children} -> [{Name, Line, Children} | Inner];
+                              _ -> Inner
+                          end
                   end, Ast).
 
 body([], _View) ->
@@ -87,7 +90,67 @@ part({expr, Line, Mode, #{form := Form, source := Source}}, View) ->
     Fun = case Mode of escaped -> escaped; raw -> raw end,
     Value = weberl_blocks_expr:render(Form, hooks(View)),
     {call, Line, {remote, Line, {atom, Line, weberl_template_runtime}, {atom, Line, Fun}},
-     [Value, {atom, Line, View}, erl_parse:abstract(Source, Line)]}.
+     [Value, {atom, Line, View}, erl_parse:abstract(Source, Line)]};
+%% `if' / `elif' / `else': each condition has to be exactly `true' or `false'.
+part({'if', Line, Branches, Else}, View) ->
+    if_chain(Branches, Else, Line, View);
+%% `case': the clauses as written, and a last one for a value nothing matches.
+part({'case', Line, #{form := Form}, Clauses}, View) ->
+    Hooks = hooks(View),
+    Scrutinee = weberl_blocks_expr:render(Form, Hooks),
+    %% A guard cannot call a function, so the assigns the guards read are fetched
+    %% first and passed in as the arguments of a fun that holds the `case'.
+    GuardAssigns = lists:usort(lists:append([A || {#{assigns := A}, _} <- Clauses])),
+    GuardHooks = Hooks#{assign := fun(Name, A) -> {var, A, guard_var(Name)} end},
+    Branches = [{clause, Line, [weberl_blocks_expr:render(Pattern, Hooks)],
+                 weberl_blocks_expr:render(Guard, GuardHooks), [body(Children, View)]}
+                || {#{pattern := Pattern, guard := Guard}, Children} <- Clauses],
+    Case = {'case', Line, Scrutinee, Branches ++ [no_clause(case_clause, Line, View)]},
+    case GuardAssigns of
+        [] ->
+            Case;
+        _ ->
+            Read = maps:get(assign, Hooks),
+            Fun = {'fun', Line, {clauses, [{clause, Line, [{var, Line, guard_var(N)} || N <- GuardAssigns],
+                                            [], [Case]}]}},
+            {call, Line, Fun, [Read(N, Line) || N <- GuardAssigns]}
+    end;
+%% `for': a list comprehension building the pieces; `empty' when it built none.
+part({'for', Line, #{qualifiers := Quals}, Body, Empty}, View) ->
+    Hooks = hooks(View),
+    Comprehension = {lc, Line, body(Body, View), weberl_blocks_expr:render(Quals, Hooks)},
+    case Empty of
+        none ->
+            Comprehension;
+        _ ->
+            {'case', Line, Comprehension,
+             [{clause, Line, [{nil, Line}], [], [body(Empty, View)]},
+              {clause, Line, [{var, Line, 'Items'}], [], [{var, Line, 'Items'}]}]}
+    end.
+
+if_chain([{#{form := Form, line := CondLine}, Children} | Rest], Else, Line, View) ->
+    Cond = weberl_blocks_expr:render(Form, hooks(View)),
+    Otherwise = case Rest of
+                    [] when Else =:= none -> {nil, Line};
+                    [] -> body(Else, View);
+                    _ -> if_chain(Rest, Else, Line, View)
+                end,
+    {'case', CondLine, Cond,
+     [{clause, CondLine, [{atom, CondLine, true}], [], [body(Children, View)]},
+      {clause, CondLine, [{atom, CondLine, false}], [], [Otherwise]},
+      no_clause(not_boolean, CondLine, View)]}.
+
+%% The variable holding an assign read by a `case' guard (cannot clash with a
+%% template local: those are `W_' and a capital or underscore).
+guard_var(Name) -> list_to_atom("W_guard_" ++ atom_to_list(Name)).
+
+%% `error({template_error, {Reason, View, Line, Value}})' for a value no clause took.
+no_clause(Reason, Line, View) ->
+    {clause, Line, [{var, Line, 'Value'}], [],
+     [{call, Line, {remote, Line, {atom, Line, erlang}, {atom, Line, error}},
+       [{tuple, Line, [{atom, Line, template_error},
+                       {tuple, Line, [{atom, Line, Reason}, {atom, Line, View},
+                                      {integer, Line, Line}, {var, Line, 'Value'}]}]}]}]}.
 
 %% What the expression front end needs from this consumer: an assign is read
 %% from the `Assigns' argument of the generated function, and the template's

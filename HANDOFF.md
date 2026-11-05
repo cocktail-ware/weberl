@@ -210,7 +210,22 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   text, `{interp, Line, Mode, Text}`; AST node `{expr, Line, Mode, Parsed}`; `weberl_template_runtime`
   `assign/3`, `escaped/3`, `raw/3` take `(Value, View, Source)`; atoms render; templates, tests, README and
   agentic's feedback file migrated/updated; the example app was started and renders; the e2e_app only
-  compiled, its browser suite was not re-run; agentic's own `.weberl` files still need the rewrite); 3 block tags: lexer, parser, validation, scope pass,
+  compiled, its browser suite was not re-run; agentic's own `.weberl` files still need the rewrite); **3 + 4 + 5 DONE together (845 eunit tests)**:
+  lexer tokens `{stmt, Line, Kind, Text, TextLine}` / `{stmt_end, Line, Kind}` (the text keeps the white space
+  after the keyword so lines count right; `else`, `cond` and `of` are Erlang reserved words, hence quoted
+  atoms and `{test, _}` as internal state); parser frames for `if`/`case`/`for` with the nodes of decision 6; scope
+  pass in `parse/2` (`unbound_variable`, `rebound_variable`, `region_uses_outer_variable`) and again on a
+  composed layout+view (`check_scope/2`); placement errors (`block_in_unsupported_context`,
+  `block_unbalanced_markup`, `region_in_for`, `slot_in_for`, `content_in_for`, `content_before_first_of`,
+  `case_without_of`, `misplaced_block_tag`, `unclosed_block`, `unexpected_block_end`,
+  `mismatched_block_end`); compiler: `if` = nested `case` with a `not_boolean` clause, `case` = native `case` +
+  `case_clause` clause, `for` = list comprehension (+ `empty` case); **decision made while building**: a guard
+  cannot call a function, so the assigns read by the guards of a `case` are fetched first and passed as the
+  arguments of a fun that holds the `case` (a missing one raises even if an earlier clause would match, and
+  no "unsafe variable" clash between sibling cases); `weberl_template_parser:children/1`, `map_children/2`,
+  `check_scope/2`; layout composition looks through blocks. Not done: README section is written, but
+  `TEMPLATE_BLOCKS.md`, the live-page behaviour with blocks (only the unit-level region rendering is
+  tested; a browser/live test of "conditional inside a region" is not), and agentic's feedback update; 3 block tags: lexer, parser, validation, scope pass,
   region rules; 4 layout composition through blocks; 5 compiler and runtime for blocks; 6 README,
   `TEMPLATE_BLOCKS.md`, agentic feedback. Item 3 (safe URLs) follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an

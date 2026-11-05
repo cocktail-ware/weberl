@@ -61,7 +61,7 @@ parse_source(Source, File) ->
 checked(Ast, File) ->
     case weberl_template_parser:validate_layout(Ast, File) of
         ok ->
-            case [L || {content, L} <- flatten(Ast)] of
+            case content_lines(Ast) of
                 [_] -> {ok, {File, Ast}};
                 [] -> {error, {missing_content, File}};
                 Lines -> {error, {multiple_content, File, Lines}}
@@ -92,10 +92,19 @@ compose({LayoutFile, LayoutAst}, ViewAst, ViewFile) ->
 composed(Ast, LayoutFile, ViewFile) ->
     Names = region_names(Ast),
     case Names -- lists:usort(Names) of
-        [Name | _] -> {error, {duplicate_region, Name, LayoutFile, ViewFile}};
-        [] -> {ok, Ast}
+        [Name | _] ->
+            {error, {duplicate_region, Name, LayoutFile, ViewFile}};
+        [] ->
+            %% each file was checked alone; together, the view may sit inside a
+            %% branch of the layout that binds a name the view binds too
+            case weberl_template_parser:check_scope(Ast, ViewFile) of
+                ok -> {ok, Ast};
+                {error, _} = Error -> Error
+            end
     end.
 
+%% The marker and the slots may stand inside the branches of an `if' or `case' (the
+%% parser keeps them out of a `for'), so everything here looks through any block.
 splice(Ast, Content, Fills) ->
     lists:flatmap(fun({content, _}) -> Content;
                      ({slot, _, Name, Default}) ->
@@ -103,25 +112,29 @@ splice(Ast, Content, Fills) ->
                               {fill, _, _, Children} -> Children;
                               false -> Default
                           end;
-                     ({region, Line, Name, Tag, Children}) ->
-                          [{region, Line, Name, Tag, splice(Children, Content, Fills)}];
-                     (Node) -> [Node]
+                     (Node) ->
+                          [weberl_template_parser:map_children(
+                             fun(Children) -> splice(Children, Content, Fills) end, Node)]
                   end, Ast).
 
 slot_names(Ast) ->
     lists:flatmap(fun({slot, _, Name, _}) -> [Name];
-                     ({region, _, _, _, Children}) -> slot_names(Children);
-                     (_) -> []
+                     (Node) -> lists:flatmap(fun slot_names/1, weberl_template_parser:children(Node))
                   end, Ast).
 
 region_names(Ast) ->
-    lists:flatmap(fun({region, _, Name, _, Children}) -> [Name | region_names(Children)];
-                     (_) -> []
+    lists:flatmap(fun(Node) ->
+                          Inner = lists:flatmap(fun region_names/1, weberl_template_parser:children(Node)),
+                          case Node of
+                              {region, _, Name, _, _} -> [Name | Inner];
+                              _ -> Inner
+                          end
                   end, Ast).
 
-flatten(Ast) ->
-    lists:flatmap(fun({region, _, _, _, Children}) -> flatten(Children);
-                     (Node) -> [Node]
+%% The lines of the `{: content :}' markers.
+content_lines(Ast) ->
+    lists:flatmap(fun({content, Line}) -> [Line];
+                     (Node) -> lists:flatmap(fun content_lines/1, weberl_template_parser:children(Node))
                   end, Ast).
 
 with({ok, V}, Next) -> Next(V);
