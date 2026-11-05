@@ -10,7 +10,7 @@
 %% for another (a CSRF token cannot be replayed as a page token).
 -module(weberl_sign).
 
--export([init/0, secret/0, mac/2]).
+-export([init/0, secret/0, configured/0, mac/2, key/1]).
 
 -define(KEY, {weberl_sign, secret}).
 
@@ -24,6 +24,20 @@ init() ->
 -spec mac(iodata(), iodata()) -> binary().
 mac(Label, Data) ->
     crypto:mac(hmac, sha256, secret(), [Label, 0, Data]).
+
+%% @doc A 32 byte key for one purpose (for example encryption), derived from the
+%% secret so that no two purposes share a key.
+-spec key(iodata()) -> binary().
+key(Label) ->
+    crypto:mac(hmac, sha256, secret(), [<<"weberl-key">>, 0, Label]).
+
+%% @doc Is the key set by configuration (`live_secret') rather than generated?
+-spec configured() -> boolean().
+configured() ->
+    case application:get_env(weberl, live_secret) of
+        {ok, Secret} when is_binary(Secret), byte_size(Secret) >= 16 -> true;
+        _ -> false
+    end.
 
 -spec secret() -> binary().
 secret() ->

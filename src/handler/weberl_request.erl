@@ -23,7 +23,7 @@
 
 -export([new/1,
          method/1, path/1, headers/1, header/2, query/1, query_params/1,
-         params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1,
+         params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1, session/1, session_get/2,
          page/1, with_page/2]).
 -export_type([t/0]).
 -export_record([request]).
@@ -116,6 +116,23 @@ cookie(#request{} = R, Name) ->
         {_, V} -> {ok, V};
         false -> error
     end.
+
+%% @doc The session in the request's cookie (see {@link weberl_session}): the map
+%% the application stored, `#{}' when there is none, or when the cookie is not
+%% ours, was tampered with or has expired. It is what the browser sent; changes
+%% made on the response in this request are not in it (read them back from the
+%% response with `weberl_response:session_get/2').
+-spec session(t()) -> map().
+session(#request{} = R) ->
+    case weberl_session:read(R) of
+        {Map, _Expires} -> Map;
+        none -> #{}
+    end.
+
+%% @doc `{ok, Value} | error' for `Key' in {@link session/1}.
+-spec session_get(t(), term()) -> {ok, term()} | error.
+session_get(#request{} = R, Key) ->
+    maps:find(Key, session(R)).
 
 %% @doc The body of an `application/x-www-form-urlencoded' request as
 %% `[{Name, Value | true}]' (binaries; `+' and percent escapes decoded; a field

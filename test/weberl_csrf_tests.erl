@@ -99,7 +99,7 @@ protect_keeps_a_handler_cache_control_test() ->
     ?assertEqual({ok, <<"private, max-age=5">>}, weberl_response:header(R, "cache-control")).
 
 secure_mode_test() ->
-    application:set_env(weberl, csrf_secure, true),
+    application:set_env(weberl, secure_cookies, true),
     try
         R = weberl_csrf:protect(stub([]), fun(_) -> weberl_response:html(200, <<>>) end),
         [Cookie] = weberl_response:header_values(R, "set-cookie"),
@@ -107,7 +107,7 @@ secure_mode_test() ->
         ?assertMatch({match, _}, re:run(Cookie, "; Path=/; Secure; HttpOnly")),
         ?assertEqual(<<"__Host-weberl_csrf">>, weberl_csrf:cookie_name())
     after
-        application:unset_env(weberl, csrf_secure)
+        application:unset_env(weberl, secure_cookies)
     end.
 
 cookie_pair(SetCookie) ->

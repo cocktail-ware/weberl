@@ -25,7 +25,7 @@
 %% </ul>
 -module(weberl_cookie).
 
--export([serialize/3]).
+-export([serialize/3, secure/0]).
 -export_type([options/0]).
 
 -type options() :: #{path => iodata(), domain => iodata(), max_age => non_neg_integer(),
@@ -58,6 +58,14 @@ serialize(Name0, Value0, Opts) when is_map(Opts) ->
                end,
     iolist_to_binary([Name, $=, Value, "; Path=", Path, Domain, MaxAge, Secure,
                       HttpOnly, SameSite]).
+
+%% @doc The `secure_cookies' setting (application env of `weberl', default
+%% `false'): the cookies Weberl makes itself (CSRF, session, flash) are `Secure'
+%% and carry the `__Host-' prefix. Set it to `true' in production (HTTPS); a
+%% `Secure' cookie is dropped over plain HTTP, which breaks local development.
+-spec secure() -> boolean().
+secure() ->
+    application:get_env(weberl, secure_cookies, false) =:= true.
 
 %% Internal
 

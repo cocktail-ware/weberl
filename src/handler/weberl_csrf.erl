@@ -24,14 +24,14 @@
 %%
 %% == Token (signed double submit) ==
 %% The browser holds a cookie (`weberl_csrf', or `__Host-weberl_csrf' when the
-%% `csrf_secure' env is `true', which also makes it `Secure') with a random nonce
+%% `secure_cookies' env is `true', which also makes it `Secure') with a random nonce
 %% and its HMAC, and the page carries the same token in a hidden form field
 %% (`_csrf', see {@link weberl_form}) or, for scripts, the `x-csrf-token' header.
 %% The request is accepted when both are equal and the HMAC is ours. Another site
 %% can make the browser send the cookie but cannot read it or the page, so it
 %% cannot supply the matching field. The MAC means a cookie planted by something
 %% else (a sibling subdomain) is rejected; `__Host-' also stops that in the
-%% browser, so set `csrf_secure' in production.
+%% browser, so set `secure_cookies' in production.
 %%
 %% A page that shows a form gets its token with {@link protect/2}, which also sets
 %% the cookie when the browser has none.
@@ -230,8 +230,7 @@ equal(A, B) when byte_size(A) =:= byte_size(B) ->
 equal(_, _) ->
     false.
 
-secure() ->
-    application:get_env(weberl, csrf_secure, false) =:= true.
+secure() -> weberl_cookie:secure().
 
 encode(Bin) -> base64:encode(Bin, #{mode => urlsafe, padding => false}).
 

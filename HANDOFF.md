@@ -86,7 +86,7 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `csrf => true | origin | false` (default `true`); `weberl_dispatch` runs `weberl_csrf:check/2` for
   POST/PUT/PATCH/DELETE (403 + `csrf_rejected` log); Origin check (authority = Host, https listener
   refuses http origin, `csrf_origins` env, `null` refused, missing passes) + signed double-submit token
-  (`weberl_csrf:protect/2`, `verify/1`, cookie `weberl_csrf` / `__Host-weberl_csrf` with `csrf_secure`,
+  (`weberl_csrf:protect/2`, `verify/1`, cookie `weberl_csrf` / `__Host-weberl_csrf` with `secure_cookies` (was `csrf_secure`),
   field `_csrf`, header `x-csrf-token`); `weberl_form:open/2,3`, `csrf_input/1`; the signing key moved to
   `weberl_sign` (shared with `weberl_live_guard`; flash can reuse it). Tests: `weberl_csrf_tests`
   (688 eunit tests pass). **Breaking**: POST routes now need a token or `csrf => false`/`origin`
@@ -94,6 +94,27 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `WEBERL_FEEDBACK.md` (and note that its `agentic_web.erl` can drop cookie parsing, form parsing,
   Set-Cookie building, redirects and CSRF), then item 6 (flash/session on top of `weberl_sign` and
   `set_cookie`), then 5, 2, 3.
+- **6, decisions (user, 2026-11-05): sessions first, then flash on top of the session.** Weberl does not
+  own logins; it offers `session`: one encrypted + authenticated cookie (ChaCha20-Poly1305, key derived from
+  `live_secret` with a label), Erlang terms (`term_to_binary`, `binary_to_term(.., [safe])` after
+  authentication), `weberl_request:session/1`, `session_get/2`; on the response `load_session(Response,
+  Request)` (explicit seed), `put_session/3`, `delete_session/2`, `set_session/2`, `reset_session/1`,
+  `session_ttl/2`, `session/1`, `session_get/2`. After `put_session(R, K, V)`, `session_get(R, K)` returns V
+  (the response holds the whole map once loaded). **Autoload**: dispatch makes the request ambient (process
+  dictionary, handlers run in the dispatch process) so `put_session` etc. load the session by themselves;
+  internal env `session_autoload` (default `true`, not public) turns it off, later per route / globally,
+  then `load_session/2` is required (`{session_not_loaded, Op}` otherwise). Size: `session_warn_bytes`
+  (3000, warning), `session_max_bytes` (3800, capped at 4096; over it the response is a logged 500). TTL:
+  `session_ttl` default 2 days, absolute (expiry inside the payload and in `Max-Age`, kept on writes, renewed
+  by `set_session`/`reset_session` or `session_ttl/2`); `infinity` = no server-side expiry, `Max-Age` 400
+  days (browser cap). No server-side revocation (document). `csrf_secure` renamed `secure_cookies` (CSRF,
+  session, flash). Flash: inside the session under a reserved key with its own short expiry; `get/1`
+  (non-consuming), `take/2` (read + clear), `keep/2` (copy request flash into the response = pass-through).
+- **6a, sessions: done** (721 eunit tests). `weberl_session` (cookie codec, ambient request,
+  `finalize/2`), response/request functions as above, `weberl_sign:key/1`, `weberl_cookie:secure/0`;
+  dispatch wraps the handler in `weberl_session:run/2` and finalizes. Tests: `weberl_session_tests`,
+  `weberl_test_cookie_adapter` (cookie-parsing stub adapter for hand-built requests). **Next: 6b flash**
+  on top of the session (reserved key, own short expiry; `get/1`, `take/2`, `keep/2`), then 5, 2, 3.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

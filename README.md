@@ -195,7 +195,9 @@ setting you should treat as required in production is `live_secret`.
 |---|---|---|
 | `live_secret` | random per node start | Key that signs page tokens (binary, at least 16 bytes; shorter values are ignored). **Set it in production**: with the default, every restart invalidates the tokens of pages already open (their beacons get 403 and give up), and nodes behind a load balancer reject each other's tokens. Keep it out of version control: read it from the environment at startup, e.g. `application:set_env(weberl, live_secret, list_to_binary(os:getenv("WEBERL_SECRET")))` before the first page is served. Rotating it invalidates open pages. |
 | `csrf_origins` | `[]` | extra trusted origins for the [CSRF](#csrf-protection) Origin check (binaries such as `<<"https://app.example">>`). |
-| `csrf_secure` | `false` | `true` makes the CSRF cookie `Secure` and `__Host-`-prefixed. **Set it in production** (HTTPS); a `Secure` cookie is dropped over plain HTTP, which breaks local development. |
+| `session_ttl` | `172800` | seconds a new [session](#session) lives (two days). |
+| `session_warn_bytes`, `session_max_bytes` | `3000`, `3800` | session cookie size (name + value) that logs a warning, and the hard limit (a `500`); the limit never exceeds 4096. |
+| `secure_cookies` | `false` | `true` makes the cookies Weberl sets itself (CSRF, session, flash) `Secure` and `__Host-`-prefixed. **Set it in production** (HTTPS); a `Secure` cookie is dropped over plain HTTP, which breaks local development. |
 | `live_subscribe_timeout` | `10000` | ms a freshly opened WebSocket may wait to subscribe its first page before it is closed. |
 | `live_attach_timeout` | `30000` | ms a rendered page may wait for its first connection before the session ends. |
 | `live_idle_timeout` | `60000` | ms a session waits for a reconnect after its transport dropped. |
@@ -493,13 +495,61 @@ token), `method => get` never carries one, `enctype` and `attrs` add attributes 
 `Action` that is not a path on this site or an `http(s)` URL raises. `weberl_form:csrf_input/1` is just
 the input. Scripts read the token from the form field or from the page and send `x-csrf-token`.
 
-Set `{csrf_secure, true}` in production (HTTPS): the cookie is then `Secure` and named
+Set `{secure_cookies, true}` in production (HTTPS): the cookie is then `Secure` and named
 `__Host-weberl_csrf`, which browsers refuse to let a sibling subdomain overwrite. Without it a cookie
 planted by a sibling subdomain is still rejected because it lacks our MAC, but the attacker can pair
 their own valid cookie and field.
 
 Not covered: forms are one helper for now (see "Forms" in `ROADMAP.md`); the live endpoints under
 `/_weberl/` have their own page tokens and Origin check (see [Credentials](#credentials)).
+
+### Session
+
+Weberl does not own logins; it gives the application a safe place for what it needs between requests
+(a user id, a "remember me" marker, a cart). The session is a map in one **encrypted and authenticated**
+cookie (`weberl_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`): the client can neither read nor change
+it. What goes in, and what it means, is yours.
+
+```erlang
+handle(Request) ->
+    UserId = maps:get(user_id, weberl_request:session(Request), undefined),   % or session_get/2
+    ...
+
+login(Request, UserId) ->
+    R0 = weberl_response:redirect("/home"),
+    R1 = weberl_response:reset_session(R0),                 % nothing of an earlier session carries over
+    R2 = weberl_response:put_session(R1, user_id, UserId),
+    weberl_response:session_ttl(R2, 30 * 86400).            % "remember me"; omit for the default
+
+logout(_Request) ->
+    weberl_response:reset_session(weberl_response:redirect("/")).    % deletes the cookie
+```
+
+| Function | |
+|---|---|
+| `weberl_request:session/1`, `session_get/2` | the session the browser sent: a map (`#{}` when missing, tampered with or expired); `{ok, V} \| error` |
+| `weberl_response:put_session/3`, `delete_session/2` | change one key |
+| `weberl_response:set_session/2`, `reset_session/1` | replace the whole session / empty it (the cookie is deleted); both start a new lifetime |
+| `weberl_response:session_ttl/2` | seconds from now, or `infinity` (no server-side expiry; the cookie lasts 400 days, a browser's maximum) |
+| `weberl_response:session/1`, `session_get/2` | what this response will send: after `put_session(R, K, V)`, `session_get(R, K)` is `{ok, V}` and every other key is still there |
+| `weberl_response:load_session/2` | start from a request's session explicitly |
+
+The first change starts from the request's session, which dispatch makes available to the handler (in the
+connection process), so `put_session/3` just works. A handler that builds its response in another
+process must call `load_session(Response, Request)` first (otherwise `{session_not_loaded, Op}`). A response
+that never touches the session sends no session cookie; an unchanged request session is not rewritten.
+
+Lifetime is absolute: a new session lives `session_ttl` seconds (default two days), a changed one keeps its
+expiry (using a session does not extend it), and `set_session/2`, `reset_session/1` and `session_ttl/2`
+start a new lifetime. Terms are stored with `term_to_binary` (compressed), so atoms, tuples and maps work;
+funs, pids and references do not belong in a session. Size: about 4 KB per cookie. `session_warn_bytes`
+(3000) logs a warning; `session_max_bytes` (3800, never more than 4096) is a hard limit: a response over it
+is a logged `500` rather than a login silently lost.
+
+Limits to know: there is no server-side record, so a session **cannot be revoked**, and a stolen cookie
+works until it expires (an application that needs revocation keeps an id or version in the session and
+checks it against its own storage). The key comes from `live_secret`: without it a restart ends every
+session (a warning is logged the first time a session is written), and rotating it does the same.
 
 ### Dispatch, errors and metadata
 

@@ -25,6 +25,17 @@ specification; kept here so they don't clutter active work.
 - Once templates have conditionals and URL-safe interpolation (feedback items 2 and 3), a plain
   `<form>` with `{{ csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
 
+## Session
+- Automatic loading of the request's session into the handler's response (`weberl_session:run/2`, the
+  process dictionary) is behind the internal env `session_autoload` (default `true`). Planned: make it
+  switchable per route and globally (route option plus a documented setting); with it off, handlers call
+  `weberl_response:load_session/2`. The ancillary code (a route option, validation, docs) is not written.
+- Key rotation: sessions, CSRF tokens and page tokens share `live_secret`; rotating it ends every session.
+  A `live_secret_previous` that is tried for decryption (and re-encrypted on write) would allow rotation.
+- Revocation needs server-side state; an optional store behaviour (as Arizona's `arizona_session_store`)
+  could sit behind the same functions, with the cookie carrying only an id.
+- Flash on top of the session (`weberl_flash:get/1`, `take/2`, `keep/2`), next.
+
 ## Request
 - `weberl_request:path/1` is the raw requested path (not percent-decoded, not
   normalized). Keep it for inspection, and add a second, converted/decoded

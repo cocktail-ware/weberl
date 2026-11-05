@@ -20,6 +20,8 @@
          with_header/3, add_header/3, with_body/2, header/2, header_values/2,
          set_cookie/3, set_cookie/4, delete_cookie/2, delete_cookie/3,
          redirect/1, redirect/2,
+         load_session/2, put_session/3, delete_session/2, set_session/2, reset_session/1,
+         session_ttl/2, session/1, session_get/2, session_state/1, session_ttl/1,
          live/2, live/1,
          status/1, headers/1, body/1,
          normalize/1]).
@@ -33,7 +35,11 @@
     headers = [] :: headers(),
     body = <<>> :: iodata(),
     %% Page kind the handler narrowed the page to, see live/2.
-    live = undefined :: undefined | normal | one_way | two_way
+    live = undefined :: undefined | normal | one_way | two_way,
+    %% The session this response sets, see the "Session" functions below. `fresh'
+    %% starts a new lifetime, `continue' keeps the request session's expiry.
+    session = undefined :: undefined | {map(), fresh | continue},
+    session_ttl = undefined :: undefined | pos_integer() | infinity
 }.
 
 -type t() :: #response{}.
@@ -109,6 +115,87 @@ redirect(Status, Location) when Status =:= 301; Status =:= 302; Status =:= 303;
     #response{status = Status, headers = [{<<"location">>, L}], body = <<>>};
 redirect(_Status, _Location) ->
     erlang:error(badarg).
+
+%% ---------------------------------------------------------------------
+%% Session (see {@link weberl_session})
+%%
+%% A response that changes the session carries the whole new map, so reading it
+%% back is exact: after `put_session(R, K, V)', `session_get(R, K)' is `{ok, V}'
+%% and every other key is still there. The first change starts from the request's
+%% session, which dispatch makes available to the handler (or which you load
+%% yourself with {@link load_session/2}). Dispatch writes the cookie after the
+%% handler returns; a response that never touches the session sends no session
+%% cookie.
+
+%% @doc Start from the session in `Request''s cookie. Only needed when automatic
+%% loading is off; a response that already holds a session is returned as it is.
+-spec load_session(t(), weberl_request:t()) -> t().
+load_session(#response{session = undefined} = R, Request) ->
+    R#response{session = {weberl_request:session(Request), continue}};
+load_session(#response{} = R, _Request) ->
+    R.
+
+%% @doc Set `Key' in the session.
+-spec put_session(t(), term(), term()) -> t().
+put_session(#response{} = R, Key, Value) ->
+    {Map, Mode} = session_base(R, put_session),
+    R#response{session = {Map#{Key => Value}, Mode}}.
+
+%% @doc Remove `Key' from the session.
+-spec delete_session(t(), term()) -> t().
+delete_session(#response{} = R, Key) ->
+    {Map, Mode} = session_base(R, delete_session),
+    R#response{session = {maps:remove(Key, Map), Mode}}.
+
+%% @doc Replace the whole session with `Map' and start a new lifetime (log in).
+-spec set_session(t(), map()) -> t().
+set_session(#response{} = R, Map) when is_map(Map) ->
+    R#response{session = {Map, fresh}}.
+
+%% @doc Empty the session: its cookie is deleted (log out; also the first step of a
+%% login, so nothing of an earlier session carries over).
+-spec reset_session(t()) -> t().
+reset_session(#response{} = R) ->
+    set_session(R, #{}).
+
+%% @doc How long this session lives from now, in seconds, or `infinity' (no
+%% server-side expiry; the cookie lasts 400 days, a browser's maximum). Starts a
+%% new lifetime ("remember me"). Without it a new session lives `session_ttl'
+%% seconds (default two days) and a changed one keeps its expiry.
+-spec session_ttl(t(), pos_integer() | infinity) -> t().
+session_ttl(#response{} = R, Ttl) when Ttl =:= infinity; is_integer(Ttl), Ttl > 0 ->
+    {Map, Mode} = session_base(R, session_ttl),
+    R#response{session = {Map, Mode}, session_ttl = Ttl};
+session_ttl(#response{}, _Ttl) ->
+    erlang:error(badarg).
+
+%% @doc The session this response will set, `undefined' when it does not touch it.
+-spec session(t()) -> undefined | map().
+session(#response{session = undefined}) -> undefined;
+session(#response{session = {Map, _}}) -> Map.
+
+%% @doc `{ok, Value} | error' for `Key' in the response's session (loading the
+%% request's if the response has none yet, like the writing functions).
+-spec session_get(t(), term()) -> {ok, term()} | error.
+session_get(#response{} = R, Key) ->
+    {Map, _Mode} = session_base(R, session_get),
+    maps:find(Key, Map).
+
+%% @private For {@link weberl_session:finalize/2}.
+-spec session_state(t()) -> undefined | {map(), fresh | continue}.
+session_state(#response{session = S}) -> S.
+
+%% @private
+-spec session_ttl(t()) -> undefined | pos_integer() | infinity.
+session_ttl(#response{session_ttl = T}) -> T.
+
+session_base(#response{session = {_, _} = S}, _Op) ->
+    S;
+session_base(#response{session = undefined}, Op) ->
+    case weberl_session:ambient() of
+        {ok, Request} -> {weberl_request:session(Request), continue};
+        none -> erlang:error({session_not_loaded, Op})
+    end.
 
 %% @doc Every value of the headers called `Name', in order (`[]' when none).
 -spec header_values(t(), iodata()) -> [binary()].

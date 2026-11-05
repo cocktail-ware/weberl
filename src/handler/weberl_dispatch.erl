@@ -29,7 +29,7 @@ dispatch(Request, Table) ->
         {ok, Route} ->
             case weberl_csrf:check(weberl_route:csrf(Route), Request) of
                 ok ->
-                    serve(weberl_route:live(Route), Route, Request);
+                    with_session(Request, fun() -> serve(weberl_route:live(Route), Route, Request) end);
                 {error, Reason} ->
                     ?LOG_WARNING(#{what => csrf_rejected, reason => Reason,
                                    method => weberl_request:method(Request),
@@ -39,6 +39,20 @@ dispatch(Request, Table) ->
             end;
         {error, not_found} ->
             weberl_response:text(404, <<"Not Found">>)
+    end.
+
+%% The request is available to the session functions of `weberl_response' while
+%% the handler runs; afterwards the session the response carries becomes its cookie.
+with_session(Request, Serve) ->
+    Response = weberl_session:run(Request, Serve),
+    case weberl_session:finalize(Request, Response) of
+        {ok, Final} ->
+            Final;
+        {error, Reason} ->
+            ?LOG_ERROR(#{what => session_not_written, reason => Reason,
+                         method => weberl_request:method(Request),
+                         path => weberl_request:path(Request)}),
+            internal_error()
     end.
 
 serve(normal, Route, Request) ->
