@@ -61,7 +61,7 @@ run(Name, Attrs, Meta, Layouts) ->
     with_tmp(fun(Dir) ->
         V = atom_to_list(weberl_test_handlers:unique(Name)) ++ "_view",
         write_tree(Dir, [{"views/" ++ V ++ ".erl", view_src(V, Attrs, Meta)},
-                         {"views/" ++ V ++ ".weberl", <<"<p>{{ t }}</p>">>} | Layouts]),
+                         {"views/" ++ V ++ ".weberl", <<"<p>{{ @t }}</p>">>} | Layouts]),
         compile_load(filename:join(Dir, "views/" ++ V ++ ".erl")),
         {Table, Result} = prepare(Dir, [filename:join(Dir, "layouts")]),
         {list_to_atom(V), Table, Result}

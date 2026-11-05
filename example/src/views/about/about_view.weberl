@@ -1,3 +1,3 @@
-    <h1>{{ title }}</h1>
-    <p>Weberl example, since {{ since }}.</p>
+    <h1>{{ @title }}</h1>
+    <p>Weberl example, since {{ @since }}.</p>
     <a href="/">Home</a>

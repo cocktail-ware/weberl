@@ -33,22 +33,26 @@ lexer_literal_test() ->
     ?assertEqual({ok, [{text, 1, <<"<p>hi</p>">>}]}, lex(<<"<p>hi</p>">>)),
     ?assertEqual({ok, []}, lex(<<>>)).
 
+%% The lexer hands the expression over exactly as written (the parser reads it).
 lexer_interpolation_test() ->
-    ?assertEqual({ok, [{text, 1, <<"a ">>}, {interp, 1, escaped, name},
-                       {text, 1, <<" b ">>}, {interp, 1, raw, html}, {text, 1, <<" c">>}]},
-                 lex(<<"a {{ name }} b {{{html}}} c">>)).
+    ?assertEqual({ok, [{text, 1, <<"a ">>}, {interp, 1, escaped, <<" @name ">>},
+                       {text, 1, <<" b ">>}, {interp, 1, raw, <<"@html">>}, {text, 1, <<" c">>}]},
+                 lex(<<"a {{ @name }} b {{{@html}}} c">>)).
 
-lexer_whitespace_in_name_test() ->
-    ?assertEqual({ok, [{interp, 1, escaped, x_1}]}, lex(<<"{{\n  x_1\t}}">>)).
+lexer_keeps_the_text_as_written_test() ->
+    ?assertEqual({ok, [{interp, 1, escaped, <<"\n  x_1\t">>}]}, lex(<<"{{\n  x_1\t}}">>)),
+    %% any text: it is the parser's business to read it as Erlang
+    ?assertEqual({ok, [{interp, 1, escaped, <<" @a + length(@b) ">>}]}, lex(<<"{{ @a + length(@b) }}">>)),
+    ?assertEqual({ok, [{interp, 1, raw, <<" f(x) ">>}]}, lex(<<"{{{ f(x) }}}">>)).
 
 lexer_lines_test() ->
-    ?assertEqual({ok, [{text, 1, <<"a\nb\n">>}, {interp, 3, escaped, x},
-                       {text, 3, <<"\n">>}, {interp, 4, raw, y}]},
-                 lex(<<"a\nb\n{{x}}\n{{{y}}}">>)).
+    ?assertEqual({ok, [{text, 1, <<"a\nb\n">>}, {interp, 3, escaped, <<"@x">>},
+                       {text, 3, <<"\n">>}, {interp, 4, raw, <<"@y">>}]},
+                 lex(<<"a\nb\n{{@x}}\n{{{@y}}}">>)).
 
 lexer_backslash_escape_test() ->
-    ?assertEqual({ok, [{text, 1, <<"{{ x }} and ">>}, {interp, 1, escaped, y}]},
-                 lex(<<"\\{{ x }} and {{y}}">>)),
+    ?assertEqual({ok, [{text, 1, <<"{{ @x }} and ">>}, {interp, 1, escaped, <<"@y">>}]},
+                 lex(<<"\\{{ @x }} and {{@y}}">>)),
     ?assertEqual({ok, [{text, 1, <<"a\\b">>}]}, lex(<<"a\\b">>)).
 
 lexer_single_braces_are_literal_test() ->
@@ -58,14 +62,11 @@ lexer_errors_test_() ->
     E = fun(Line, Reason) -> {error, {syntax_error, "t.weberl", Line, Reason}} end,
     [?_assertEqual(E(1, unterminated_interpolation), lex(<<"{{ x">>)),
      ?_assertEqual(E(2, unterminated_interpolation), lex(<<"a\n{{ x\n y">>)),
-     ?_assertEqual(E(1, unterminated_raw_interpolation), lex(<<"{{{ x }}">>)),
-     ?_assertEqual(E(1, {invalid_variable_name, <<>>}), lex(<<"{{}}">>)),
-     ?_assertEqual(E(1, {invalid_variable_name, <<"  ">>}), lex(<<"{{  }}">>)),
-     ?_assertEqual(E(3, {invalid_variable_name, <<" a + b ">>}), lex(<<"\n\n{{ a + b }}">>)),
-     ?_assertEqual(E(1, {invalid_variable_name, <<" Upper ">>}), lex(<<"{{ Upper }}">>)),
-     ?_assertEqual(E(1, {invalid_variable_name, <<" a.b ">>}), lex(<<"{{ a.b }}">>)),
-     ?_assertEqual(E(1, {invalid_variable_name, <<" 1a ">>}), lex(<<"{{ 1a }}">>)),
-     ?_assertEqual(E(1, {invalid_variable_name, <<" f(x) ">>}), lex(<<"{{{ f(x) }}}">>))].
+     ?_assertEqual(E(1, unterminated_raw_interpolation), lex(<<"{{{ @x }}">>)),
+     ?_assertEqual(E(1, empty_interpolation), lex(<<"{{}}">>)),
+     ?_assertEqual(E(1, empty_interpolation), lex(<<"{{  }}">>)),
+     ?_assertEqual(E(3, empty_interpolation), lex(<<"\n\n{{ \n }}">>)),
+     ?_assertEqual(E(1, empty_interpolation), lex(<<"{{{ }}}">>))].
 
 %% ---------------------------------------------------------------------
 %% rendering
@@ -76,56 +77,56 @@ literal_html_test() ->
     ?assertEqual(<<>>, render(tpl(<<>>), #{})).
 
 spec_example_test() ->
-    V = tpl(<<"<main class=\"home\">\n    <h1>{{ title }}</h1>\n"
-              "    <p>{{ description }}</p>\n</main>\n">>),
+    V = tpl(<<"<main class=\"home\">\n    <h1>{{ @title }}</h1>\n"
+              "    <p>{{ @description }}</p>\n</main>\n">>),
     ?assertEqual(<<"<main class=\"home\">\n    <h1>Welcome</h1>\n"
                    "    <p>Built with Weberl</p>\n</main>\n">>,
                  render(V, #{title => <<"Welcome">>, description => <<"Built with Weberl">>})).
 
 escaping_test() ->
-    V = tpl(<<"<p>{{ v }}</p>">>),
+    V = tpl(<<"<p>{{ @v }}</p>">>),
     ?assertEqual(<<"<p>&lt;a&gt; &amp; &quot;q&quot; &#39;s&#39;</p>">>,
                  render(V, #{v => <<"<a> & \"q\" 's'">>})).
 
 escaping_order_does_not_double_escape_test() ->
-    ?assertEqual(<<"&amp;lt;">>, render(tpl(<<"{{v}}">>), #{v => <<"&lt;">>})).
+    ?assertEqual(<<"&amp;lt;">>, render(tpl(<<"{{@v}}">>), #{v => <<"&lt;">>})).
 
 raw_test() ->
-    V = tpl(<<"<div>{{{ html }}}</div>">>),
+    V = tpl(<<"<div>{{{ @html }}}</div>">>),
     ?assertEqual(<<"<div><b>bold</b> & more</div>">>,
                  render(V, #{html => <<"<b>bold</b> & more">>})).
 
 attribute_interpolation_test() ->
-    V = tpl(<<"<a class=\"{{ c }}\" title='{{ t }}'>x</a>">>),
+    V = tpl(<<"<a class=\"{{ @c }}\" title='{{ @t }}'>x</a>">>),
     ?assertEqual(<<"<a class=\"a&quot;b\" title='it&#39;s'>x</a>">>,
                  render(V, #{c => <<"a\"b">>, t => <<"it's">>})).
 
 utf8_is_preserved_test() ->
-    ?assertEqual(<<"héllo ✓"/utf8>>, render(tpl(<<"{{v}}"/utf8>>), #{v => <<"héllo ✓"/utf8>>})),
-    ?assertEqual(<<"π: {{x}}"/utf8>>, render(tpl(<<"π: \\{{x}}"/utf8>>), #{})).
+    ?assertEqual(<<"héllo ✓"/utf8>>, render(tpl(<<"{{@v}}"/utf8>>), #{v => <<"héllo ✓"/utf8>>})),
+    ?assertEqual(<<"π: {{@x}}"/utf8>>, render(tpl(<<"π: \\{{@x}}"/utf8>>), #{})).
 
 value_types_test() ->
-    V = tpl(<<"{{a}}|{{b}}|{{c}}|{{d}}|{{e}}|{{f}}|{{g}}">>),
+    V = tpl(<<"{{@a}}|{{@b}}|{{@c}}|{{@d}}|{{@e}}|{{@f}}|{{@g}}">>),
     ?assertEqual(<<"text|chars|42|-7|1.5|true|false">>,
                  render(V, #{a => <<"text">>, b => "chars", c => 42, d => -7, e => 1.5,
                              f => true, g => false})),
-    ?assertEqual(<<"é"/utf8>>, render(tpl(<<"{{v}}"/utf8>>), #{v => [233]})),
-    ?assertEqual(<<"0.1">>, render(tpl(<<"{{v}}">>), #{v => 0.1})).
+    ?assertEqual(<<"é"/utf8>>, render(tpl(<<"{{@v}}"/utf8>>), #{v => [233]})),
+    ?assertEqual(<<"0.1">>, render(tpl(<<"{{@v}}">>), #{v => 0.1})).
 
 extra_assigns_are_ignored_test() ->
-    ?assertEqual(<<"x">>, render(tpl(<<"{{a}}">>), #{a => <<"x">>, other => <<"y">>})).
+    ?assertEqual(<<"x">>, render(tpl(<<"{{@a}}">>), #{a => <<"x">>, other => <<"y">>})).
 
 repeated_use_of_one_variable_test() ->
-    ?assertEqual(<<"1 1">>, render(tpl(<<"{{a}} {{a}}">>), #{a => 1})).
+    ?assertEqual(<<"1 1">>, render(tpl(<<"{{@a}} {{@a}}">>), #{a => 1})).
 
 rendering_with_different_values_test() ->
-    V = tpl(<<"Hello {{ who }}!">>),
+    V = tpl(<<"Hello {{ @who }}!">>),
     ?assertEqual(<<"Hello A!">>, render(V, #{who => <<"A">>})),
     ?assertEqual(<<"Hello B!">>, render(V, #{who => <<"B">>})),
     ?assertEqual(<<"Hello 3!">>, render(V, #{who => 3})).
 
 render_returns_iodata_test() ->
-    V = tpl(<<"a{{x}}b">>),
+    V = tpl(<<"a{{@x}}b">>),
     ?assert(is_list(weberl_template:render(V, #{x => <<"-">>}))).
 
 %% ---------------------------------------------------------------------
@@ -139,24 +140,26 @@ render_error(Fun) ->
     end.
 
 missing_variable_test() ->
-    V = tpl(<<"{{ a }} {{ b }}">>),
+    V = tpl(<<"{{ @a }} {{ @b }}">>),
     ?assertEqual({missing_variable, V, b},
                  render_error(fun() -> weberl_template:render(V, #{a => 1}) end)),
     ?assertEqual({missing_variable, V, a},
                  render_error(fun() -> weberl_template:render(V, #{}) end)).
 
+%% Atoms render as their name; everything else that is not text or a number is refused.
 unsupported_values_test_() ->
-    Bad = [some_atom, {a, tuple}, #{a => 1}, [not_chars], [-1], <<255, 254>>, self(), fun() -> ok end],
+    Bad = [{a, tuple}, #{a => 1}, [not_chars], [-1], <<255, 254>>, self(), fun() -> ok end],
     [fun() ->
-             V = tpl(<<"{{ v }}">>),
-             ?assertEqual({unsupported_value, V, v, Value},
+             V = tpl(<<"{{ @v }}">>),
+             %% the error names the expression, as written
+             ?assertEqual({unsupported_value, V, <<"@v">>, Value},
                           render_error(fun() -> weberl_template:render(V, #{v => Value}) end))
      end || Value <- Bad].
 
 unsupported_value_in_raw_test() ->
-    V = tpl(<<"{{{ v }}}">>),
-    ?assertEqual({unsupported_value, V, v, an_atom},
-                 render_error(fun() -> weberl_template:render(V, #{v => an_atom}) end)).
+    V = tpl(<<"{{{ @v }}}">>),
+    ?assertEqual({unsupported_value, V, <<"@v">>, {an, atom}},
+                 render_error(fun() -> weberl_template:render(V, #{v => {an, atom}}) end)).
 
 invalid_assigns_test() ->
     V = tpl(<<"x">>),
@@ -170,7 +173,7 @@ no_template_test() ->
     ?assertNot(weberl_template:has_template(V)).
 
 try_render_test() ->
-    V = tpl(<<"{{ a }}">>),
+    V = tpl(<<"{{ @a }}">>),
     ?assert(weberl_template:has_template(V)),
     ?assertMatch({ok, _}, weberl_template:try_render(V, #{a => 1})),
     ?assertEqual({error, {missing_variable, V, a}}, weberl_template:try_render(V, #{})).
@@ -184,57 +187,57 @@ syntax_errors_carry_file_and_line_test() ->
                                                 "views/home_view.weberl")).
 
 allowed_contexts_test_() ->
-    Ok = [<<"<p>{{a}}</p>">>,
-          <<"<p>{{{a}}}</p>">>,
-          <<"{{a}}">>,
-          <<"<a title=\"{{a}}\">x</a>">>,
-          <<"<a title='{{a}}'>x</a>">>,
-          <<"<input value=\"{{a}}\" class=\"x\">">>,
-          <<"<input class=\"x\" value = \"{{a}}\"/>">>,
-          <<"<!-- c --> {{a}}">>,
-          <<"<!DOCTYPE html><p>{{a}}</p>">>,
-          <<"<script>var x = 1 < 2;</script>{{a}}">>,
-          <<"<style>p { color: red }</style>{{a}}">>,
-          <<"1 < 2 {{a}}">>,
-          <<"<br/>{{a}}">>,
-          <<"<p data-x=\"1\" hidden>{{a}}</p>">>,
-          <<"<textarea>{{a}}</textarea>">>,
-          <<"<p title=\"a > b {{a}}\">">>],
+    Ok = [<<"<p>{{@a}}</p>">>,
+          <<"<p>{{{@a}}}</p>">>,
+          <<"{{@a}}">>,
+          <<"<a title=\"{{@a}}\">x</a>">>,
+          <<"<a title='{{@a}}'>x</a>">>,
+          <<"<input value=\"{{@a}}\" class=\"x\">">>,
+          <<"<input class=\"x\" value = \"{{@a}}\"/>">>,
+          <<"<!-- c --> {{@a}}">>,
+          <<"<!DOCTYPE html><p>{{@a}}</p>">>,
+          <<"<script>var x = 1 < 2;</script>{{@a}}">>,
+          <<"<style>p { color: red }</style>{{@a}}">>,
+          <<"1 < 2 {{@a}}">>,
+          <<"<br/>{{@a}}">>,
+          <<"<p data-x=\"1\" hidden>{{@a}}</p>">>,
+          <<"<textarea>{{@a}}</textarea>">>,
+          <<"<p title=\"a > b {{@a}}\">">>],
     [?_assertMatch({ok, _}, compile(Src)) || Src <- Ok].
 
 rejected_contexts_test_() ->
     Cases =
-        [{<<"<p {{a}}>x</p>">>, {interpolation_in_unsupported_context, tag}},
-         {<<"<p class={{a}}>x</p>">>, {interpolation_in_unsupported_context, unquoted_attribute}},
-         {<<"<p class=a{{a}}>x</p>">>, {interpolation_in_unsupported_context, unquoted_attribute}},
-         {<<"<{{a}}>">>, {interpolation_in_unsupported_context, tag}},
-         {<<"<p>x</{{a}}>">>, {interpolation_in_unsupported_context, end_tag}},
-         {<<"<div {{a}}=\"x\">">>, {interpolation_in_unsupported_context, tag}},
-         {<<"<div x{{a}}=\"x\">">>, {interpolation_in_unsupported_context, tag}},
-         {<<"<!-- {{a}} -->">>, {interpolation_in_unsupported_context, comment}},
-         {<<"<!DOCTYPE {{a}}>">>, {interpolation_in_unsupported_context, declaration}},
-         {<<"<script>var x = \"{{a}}\";</script>">>, {interpolation_in_unsupported_context, <<"script">>}},
-         {<<"<SCRIPT>{{a}}</SCRIPT>">>, {interpolation_in_unsupported_context, <<"script">>}},
-         {<<"<style>p { color: {{a}} }</style>">>, {interpolation_in_unsupported_context, <<"style">>}},
-         {<<"<a href=\"{{a}}\">x</a>">>, {interpolation_in_restricted_attribute, <<"href">>}},
-         {<<"<A HREF=\"{{a}}\">x</A>">>, {interpolation_in_restricted_attribute, <<"href">>}},
-         {<<"<img src='{{a}}'>">>, {interpolation_in_restricted_attribute, <<"src">>}},
-         {<<"<form action=\"/x/{{a}}\">">>, {interpolation_in_restricted_attribute, <<"action">>}},
-         {<<"<a onclick=\"{{a}}\">x</a>">>, {interpolation_in_restricted_attribute, <<"onclick">>}},
-         {<<"<p style=\"{{a}}\">x</p>">>, {interpolation_in_restricted_attribute, <<"style">>}},
-         {<<"<p title=\"{{{a}}}\">x</p>">>, {raw_interpolation_in_attribute, <<"title">>}}],
+        [{<<"<p {{@a}}>x</p>">>, {interpolation_in_unsupported_context, tag}},
+         {<<"<p class={{@a}}>x</p>">>, {interpolation_in_unsupported_context, unquoted_attribute}},
+         {<<"<p class=a{{@a}}>x</p>">>, {interpolation_in_unsupported_context, unquoted_attribute}},
+         {<<"<{{@a}}>">>, {interpolation_in_unsupported_context, tag}},
+         {<<"<p>x</{{@a}}>">>, {interpolation_in_unsupported_context, end_tag}},
+         {<<"<div {{@a}}=\"x\">">>, {interpolation_in_unsupported_context, tag}},
+         {<<"<div x{{@a}}=\"x\">">>, {interpolation_in_unsupported_context, tag}},
+         {<<"<!-- {{@a}} -->">>, {interpolation_in_unsupported_context, comment}},
+         {<<"<!DOCTYPE {{@a}}>">>, {interpolation_in_unsupported_context, declaration}},
+         {<<"<script>var x = \"{{@a}}\";</script>">>, {interpolation_in_unsupported_context, <<"script">>}},
+         {<<"<SCRIPT>{{@a}}</SCRIPT>">>, {interpolation_in_unsupported_context, <<"script">>}},
+         {<<"<style>p { color: {{@a}} }</style>">>, {interpolation_in_unsupported_context, <<"style">>}},
+         {<<"<a href=\"{{@a}}\">x</a>">>, {interpolation_in_restricted_attribute, <<"href">>}},
+         {<<"<A HREF=\"{{@a}}\">x</A>">>, {interpolation_in_restricted_attribute, <<"href">>}},
+         {<<"<img src='{{@a}}'>">>, {interpolation_in_restricted_attribute, <<"src">>}},
+         {<<"<form action=\"/x/{{@a}}\">">>, {interpolation_in_restricted_attribute, <<"action">>}},
+         {<<"<a onclick=\"{{@a}}\">x</a>">>, {interpolation_in_restricted_attribute, <<"onclick">>}},
+         {<<"<p style=\"{{@a}}\">x</p>">>, {interpolation_in_restricted_attribute, <<"style">>}},
+         {<<"<p title=\"{{{@a}}}\">x</p>">>, {raw_interpolation_in_attribute, <<"title">>}}],
     [?_assertEqual({1, Reason}, err(Src)) || {Src, Reason} <- Cases].
 
 rejected_context_reports_line_test() ->
     ?assertEqual({3, {interpolation_in_restricted_attribute, <<"href">>}},
-                 err(<<"<p>\n  ok {{ a }}\n  <a href=\"{{ b }}\">x</a>\n</p>">>)
+                 err(<<"<p>\n  ok {{ @a }}\n  <a href=\"{{ @b }}\">x</a>\n</p>">>)
                  ),
     ok.
 
 context_resumes_after_script_test() ->
-    ?assertMatch({ok, _}, compile(<<"<script>x</script>\n<p>{{a}}</p>">>)),
+    ?assertMatch({ok, _}, compile(<<"<script>x</script>\n<p>{{@a}}</p>">>)),
     ?assertEqual({2, {interpolation_in_unsupported_context, <<"script">>}},
-                 err(<<"<p>{{a}}</p>\n<script>{{b}}</script>">>)).
+                 err(<<"<p>{{@a}}</p>\n<script>{{@b}}</script>">>)).
 
 %% ---------------------------------------------------------------------
 %% compile
@@ -254,7 +257,7 @@ compile_does_not_load_test() ->
 rendered_without_reading_the_file_again_test() ->
     with_tmp(fun(Dir) ->
         File = filename:join(Dir, "a.weberl"),
-        ok = file:write_file(File, <<"v1 {{x}}">>),
+        ok = file:write_file(File, <<"v1 {{@x}}">>),
         V = unique_view(),
         ok = weberl_template:compile_and_load_file(V, File),
         ok = file:delete(File),
@@ -284,7 +287,7 @@ generated_module_does_not_touch_view_test() ->
     ?assertEqual(non_existing, code:which(V)).
 
 generated_module_info_test() ->
-    V = tpl(<<"{{ b }} {{{ a }}} {{ b }}">>),
+    V = tpl(<<"{{ @b }} {{{ @a }}} {{ @b }}">>),
     ?assertMatch(#{view := V, variables := [a, b]},
                  (weberl_template:generated_module(V)):info()).
 

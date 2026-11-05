@@ -4,10 +4,10 @@
 {: /fill head :}
     <h1>Counter</h1>
     <p>Server time:
-        {: region clock :}<span id="time">{{ time }}</span>{: /region clock :}
+        {: region clock :}<span id="time">{{ @time }}</span>{: /region clock :}
     </p>
     <p>
-        Count: {: region count :}<strong id="count">{{ count }}</strong>{: /region count :}
+        Count: {: region count :}<strong id="count">{{ @count }}</strong>{: /region count :}
         <button id="add" type="button">Add 1</button>
     </p>
     <p>Open for <span id="age">?</span> seconds (asked from the server's private view data)</p>

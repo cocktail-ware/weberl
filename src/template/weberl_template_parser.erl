@@ -8,7 +8,9 @@
 %% AST nodes:
 %% <ul>
 %%   <li>`{text, Line, Binary}'</li>
-%%   <li>`{var, Line, Name, escaped | raw}'</li>
+%%   <li>`{expr, Line, escaped | raw, Parsed}': `{{ Expr }}' / `{{{ Expr }}}'. `Parsed' is
+%%       what `weberl_blocks_expr:expression/2' returned (`form', `assigns', `free',
+%%       `bound') plus `source', the expression text.</li>
 %%   <li>`{region, Line, Name, Tag, Children}': a region (`{: region name :}').
 %%       `Tag' is `default' (the `weberl-region' web component) or the binary
 %%       name of another element. Regions may nest; a name is used once per
@@ -25,7 +27,7 @@
 -export_type([ast/0, ast_node/0]).
 
 -type ast_node() :: {text, pos_integer(), binary()}
-              | {var, pos_integer(), atom(), escaped | raw}
+              | {expr, pos_integer(), escaped | raw, map()}
               | {region, pos_integer(), atom(), default | binary(), ast()}
               | {content, pos_integer()}
               | {slot | fill, pos_integer(), atom(), ast()}.
@@ -55,8 +57,8 @@ build([], [{Kind, Name, Line, _, _} | _], _Acc, _Seen) ->
     throw({parse_error, Line, {event(unclosed, Kind), Name}});
 build([{text, Line, Bin} | T], Stack, Acc, Seen) ->
     build(T, Stack, [{text, Line, Bin} | Acc], Seen);
-build([{interp, Line, Mode, Name} | T], Stack, Acc, Seen) ->
-    build(T, Stack, [{var, Line, Name, Mode} | Acc], Seen);
+build([{interp, Line, Mode, Content} | T], Stack, Acc, Seen) ->
+    build(T, Stack, [{expr, Line, Mode, expression(Content, Line)} | Acc], Seen);
 build([{content, Line} | T], Stack, Acc, Seen) ->
     case [Name || {Kind, Name, _, _, _} <- Stack, Kind =/= region] of
         [] -> build(T, Stack, [{content, Line} | Acc], Seen);
@@ -96,6 +98,20 @@ nesting(slot, Name, Line, Stack) ->
     end;
 nesting(_, _, _, _) ->
     ok.
+
+%% The Erlang expression of an interpolation. Until blocks exist to bind them, a
+%% local variable has no value: `{unbound_variable, Name}'.
+expression(Content, Line) ->
+    case weberl_blocks_expr:expression(Content, Line) of
+        {ok, #{free := [Name | _]}} ->
+            throw({parse_error, Line, {unbound_variable, Name}});
+        {ok, Parsed} ->
+            Parsed#{source => string:trim(Content, both, " \t\r\n")};
+        {error, {invalid_expression, Text, {ErrLine, Message}}} ->
+            throw({parse_error, ErrLine, {invalid_expression, Text, Message}});
+        {error, Reason} ->
+            throw({parse_error, Line, Reason})
+    end.
 
 duplicate(region) -> duplicate_region;
 duplicate(slot) -> duplicate_slot;
@@ -144,7 +160,7 @@ walk([], Ctx, _Env) ->
     {ok, Ctx};
 walk([{text, _, Bin} | Rest], Ctx, Env) ->
     walk(Rest, weberl_template_html:advance(Bin, Ctx), Env);
-walk([{var, Line, _Name, Mode} | Rest], Ctx, {File, _} = Env) ->
+walk([{expr, Line, Mode, _Parsed} | Rest], Ctx, {File, _} = Env) ->
     case weberl_template_html:check(Ctx, Mode) of
         ok -> walk(Rest, Ctx, Env);
         {error, Reason} -> {error, {syntax_error, File, Line, Reason}}
@@ -196,14 +212,14 @@ context_name({raw_text, Tag}) -> Tag;
 context_name({value, _, _, _}) -> attribute_value;
 context_name(Ctx) when is_tuple(Ctx) -> tag.
 
-%% @doc Variables used by the template (also inside regions), sorted and
+%% @doc The assigns (`@name') the template uses (also inside regions), sorted and
 %% without duplicates.
 -spec variables(ast()) -> [atom()].
 variables(Ast) ->
     lists:usort(vars(Ast)).
 
 vars(Ast) ->
-    lists:flatmap(fun({var, _, Name, _}) -> [Name];
+    lists:flatmap(fun({expr, _, _, #{assigns := Assigns}}) -> Assigns;
                      ({region, _, _, _, Children}) -> vars(Children);
                      ({Slot, _, _, Children}) when Slot =:= slot; Slot =:= fill -> vars(Children);
                      (_) -> []

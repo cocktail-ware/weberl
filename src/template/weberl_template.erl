@@ -11,11 +11,16 @@
 %% '''
 %%
 %% == Syntax ==
-%% `{{ name }}' inserts an HTML-escaped value, `{{{ name }}}' inserts it
-%% unescaped (unsafe for untrusted input). Everything else is literal. `\{{'
-%% writes a literal `{{'. Names are `[a-z][a-zA-Z0-9_]*' and are looked up as
-%% atom keys in the assigns map. Supported values: UTF-8 binaries, character
-%% lists, integers, floats, booleans (`true'/`false').
+%% `{{ Expr }}' inserts the value of an Erlang expression, HTML-escaped;
+%% `{{{ Expr }}}' inserts it unescaped (unsafe for untrusted input). An assign is
+%% only ever written `@name' (`{{ @title }}'; looked up as an atom key in the
+%% assigns map): a bare `name' is the atom `name', rendered as the text `name'.
+%% Capitalized names are local variables (bound by blocks, which come later).
+%% Everything else is literal. `\{{' writes a literal `{{'. Supported values:
+%% UTF-8 binaries, character lists, integers, floats and atoms (their name).
+%% The tag ends at the first `}}': an expression with two closing braces of its
+%% own needs a space between them. See `weberl_blocks_expr' for the expression
+%% language.
 %%
 %% Interpolation is allowed in HTML text and in quoted attribute values only
 %% (see `weberl_template_html'); other places are rejected at compile time.
@@ -41,7 +46,8 @@
 %% `{compile_failed, Errors}'. {@link render/2} raises
 %% `error({template_error, Reason})' (`{no_template, View}',
 %% `{invalid_assigns, View, Assigns}', `{missing_variable, View, Name}',
-%% `{unsupported_value, View, Name, Value}'); {@link try_render/2} returns
+%% `{unsupported_value, View, Source, Value}', `Source' being the expression as
+%% written); {@link try_render/2} returns
 %% `{error, Reason}' instead.
 -module(weberl_template).
 

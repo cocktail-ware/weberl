@@ -23,7 +23,7 @@ specification; kept here so they don't clutter active work.
   `#{name, filename, content_type, body}`); today `form/1` refuses `multipart/form-data` and Roadrunner
   buffers the whole body.
 - Once templates have conditionals and URL-safe interpolation (feedback items 2 and 3), a plain
-  `<form>` with `{{ csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
+  `<form>` with `{{ @csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
 
 ## Template blocks inside tags and attributes
 - `{: if :}`, `{: case :}` and `{: for :}` (see HANDOFF "2") first stand only in HTML text. To extend, as a

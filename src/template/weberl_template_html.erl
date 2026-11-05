@@ -1,7 +1,7 @@
 %% @doc Minimal HTML context tracker used to validate where interpolation may
 %% appear. It is not an HTML parser: it follows just enough of the tokenizer
 %% states (text, comments, tags, attributes, `script'/`style' content) to know
-%% where a `{{ name }}' sits.
+%% where a `{{ @name }}' sits.
 %%
 %% HTML escaping makes a value safe in text and in quoted attribute values, and
 %% nowhere else. Interpolation is therefore only allowed in:

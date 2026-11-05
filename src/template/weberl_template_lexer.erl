@@ -3,10 +3,14 @@
 %% Splits a template into literal text and interpolation tokens:
 %% <ul>
 %%   <li>`{text, Line, Binary}'</li>
-%%   <li>`{interp, Line, escaped | raw, Name}' for `{{ name }}' and `{{{ name }}}'</li>
+%%   <li>`{interp, Line, escaped | raw, Text}' for `{{ Expr }}' and `{{{ Expr }}}'</li>
 %% </ul>
-%% `Line' is the line of the first character of the token. Names match
-%% `[a-z][a-zA-Z0-9_]*'; surrounding whitespace is ignored. A backslash directly
+%% `Line' is the line of the first character of the token. `Text' is the
+%% Erlang expression exactly as written between the delimiters (the parser reads it
+%% with `weberl_blocks_expr'; its newlines count towards the template's line
+%% numbers). The tag ends at the first `}}' (`}}}' for the raw form), so an
+%% expression that contains those characters needs a space: `#{a => #{b => 1} }'.
+%% A backslash directly
 %% before `{{' yields a literal `{{'. Block tags `{: ... :}' (statements) give
 %% <ul>
 %%   <li>`{block_open, Line, region, Name, #{tag => Binary}}' for
@@ -19,7 +23,7 @@
 %% template). `\{:' is a literal `{:'. Errors:
 %% `{error, {syntax_error, File, Line, Reason}}' with Reason
 %% `unterminated_interpolation | unterminated_raw_interpolation |
-%% unterminated_block_tag | {invalid_variable_name, Text} |
+%% unterminated_block_tag | empty_interpolation |
 %% {invalid_block_tag, Text} | {invalid_region_tag, Tag}'.
 -module(weberl_template_lexer).
 
@@ -27,7 +31,7 @@
 -export_type([token/0]).
 
 -type token() :: {text, pos_integer(), binary()}
-               | {interp, pos_integer(), escaped | raw, atom()}
+               | {interp, pos_integer(), escaped | raw, binary()}
                | {block_open, pos_integer(), region | slot | fill, atom(), #{tag => binary()}}
                | {block_close, pos_integer(), region | slot | fill, atom()}
                | {content, pos_integer()}.
@@ -69,9 +73,10 @@ interp(Mode, Close, Rest, Line, Acc) ->
         {Pos, Len} ->
             Content = binary:part(Rest, 0, Pos),
             After = binary:part(Rest, Pos + Len, byte_size(Rest) - Pos - Len),
-            Name = name(Content, Line),
+            string:trim(Content, both, " \t\r\n") =/= <<>>
+                orelse throw({lex_error, Line, empty_interpolation}),
             Line2 = Line + count_newlines(Content),
-            scan(After, Line2, <<>>, [{interp, Line, Mode, Name} | Acc])
+            scan(After, Line2, <<>>, [{interp, Line, Mode, Content} | Acc])
     end.
 
 %% A block tag `{: ... :}' (statements, as opposed to the values of `{{ }}').
@@ -144,13 +149,6 @@ unusable_tags() ->
     [<<"script">>, <<"style">>, <<"textarea">>, <<"title">>, <<"area">>, <<"base">>, <<"br">>,
      <<"col">>, <<"embed">>, <<"hr">>, <<"img">>, <<"input">>, <<"link">>, <<"meta">>,
      <<"source">>, <<"track">>, <<"wbr">>].
-
-name(Content, Line) ->
-    Trimmed = string:trim(Content, both, " \t\r\n"),
-    case re:run(Trimmed, "^[a-z][a-zA-Z0-9_]*$", [{capture, none}]) of
-        match -> binary_to_atom(Trimmed, utf8);
-        nomatch -> throw({lex_error, Line, {invalid_variable_name, Content}})
-    end.
 
 %% Text accumulated so far starts on the line where it began.
 flush(<<>>, _Line, Acc) -> Acc;

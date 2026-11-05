@@ -22,7 +22,7 @@ view() ->
       View, "-module(" ++ atom_to_list(View) ++ "). -export([handle/1]). "
             "handle(_) -> weberl_response:html(200, <<\"<html><body>x</body></html>\">>)."),
     {ok, C} = weberl_template:compile_source(
-                View, <<"<h1>{{ title }}</h1>{: region cart :}<ul>{{ items }}</ul>{: /region cart :}">>,
+                View, <<"<h1>{{ @title }}</h1>{: region cart :}<ul>{{ @items }}</ul>{: /region cart :}">>,
                 "t.weberl"),
     ok = weberl_template:load(C),
     View.

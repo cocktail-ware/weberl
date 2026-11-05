@@ -68,9 +68,9 @@ view() ->
     View = weberl_test_handlers:unique("vw"),
     weberl_test_handlers:load(View, source(View)),
     {ok, C} = weberl_template:compile_source(
-                View, <<"<h1>{{ title }}</h1>"
-                        "{: region count :}<b>{{ count }}</b>{: /region count :}"
-                        "{: region name :}<i>{{ title }}</i>{: /region name :}">>,
+                View, <<"<h1>{{ @title }}</h1>"
+                        "{: region count :}<b>{{ @count }}</b>{: /region count :}"
+                        "{: region name :}<i>{{ @title }}</i>{: /region name :}">>,
                 "t.weberl"),
     ok = weberl_template:load(C),
     View.
@@ -223,7 +223,7 @@ through_dispatch() ->
             "    #{n := N} = weberl_view_data:assigns(V), "
             "    {reply, maps:get(who, weberl_view_data:private(V)), weberl_view_data:with_assigns(#{n => N + 1}, V)}."),
     {ok, C} = weberl_template:compile_source(
-                View, <<"<body>{: region n :}<b>{{ n }}</b>{: /region n :}</body>">>, "t.weberl"),
+                View, <<"<body>{: region n :}<b>{{ @n }}</b>{: /region n :}</body>">>, "t.weberl"),
     ok = weberl_template:load(C),
     {ok, Table} = weberl_table:assemble(
                     [], [weberl_route:new("/p", View, declarative, router, #{live => one_way})]),

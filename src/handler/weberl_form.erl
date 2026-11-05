@@ -1,6 +1,6 @@
 %% @doc Basic HTML form helpers.
 %%
-%% They return `iodata()' to insert in a template with `{{{ name }}}' (raw: the
+%% They return `iodata()' to insert in a template with `{{{ @name }}}' (raw: the
 %% helpers escape what they are given). Forms are protected against CSRF by
 %% default: {@link open/3} adds the hidden token field unless told `csrf => false'.
 %% Get the token for the page with {@link weberl_csrf:protect/2}.

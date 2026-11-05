@@ -83,7 +83,18 @@ part({region, Line, Name, Tag, Children}, View) ->
     {Open, Close} = wrapper(Name, Tag),
     {cons, Line, erl_parse:abstract(Open),
      {cons, Line, body(Children, View), {cons, Line, erl_parse:abstract(Close), {nil, Line}}}};
-part({var, Line, Name, Mode}, View) ->
+part({expr, Line, Mode, #{form := Form, source := Source}}, View) ->
     Fun = case Mode of escaped -> escaped; raw -> raw end,
+    Value = weberl_blocks_expr:render(Form, hooks(View)),
     {call, Line, {remote, Line, {atom, Line, weberl_template_runtime}, {atom, Line, Fun}},
-     [{atom, Line, Name}, {var, Line, 'Assigns'}, {atom, Line, View}]}.
+     [Value, {atom, Line, View}, erl_parse:abstract(Source, Line)]}.
+
+%% What the expression front end needs from this consumer: an assign is read
+%% from the `Assigns' argument of the generated function, and the template's
+%% locals get a prefix so they cannot clash with the generated code's variables.
+hooks(View) ->
+    #{assign => fun(Name, A) ->
+                        {call, A, {remote, A, {atom, A, weberl_template_runtime}, {atom, A, assign}},
+                         [{atom, A, Name}, {var, A, 'Assigns'}, {atom, A, View}]}
+                end,
+      local => fun(Name) -> list_to_atom("W_" ++ atom_to_list(Name)) end}.

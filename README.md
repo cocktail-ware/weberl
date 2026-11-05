@@ -53,7 +53,7 @@ handle(_Request) ->
 ```
 
 ```html
-<h1>{{ title }}</h1>
+<h1>{{ @title }}</h1>
 ```
 
 Put the router under your own supervisor:
@@ -489,7 +489,7 @@ handle(Request) ->
 ```
 
 `protect/2` sets the cookie only when the browser has none, and adds `cache-control: private, no-store`
-(the page carries a per-browser token) unless the handler set one. In the template, `{{{ form }}}`
+(the page carries a per-browser token) unless the handler set one. In the template, `{{{ @form }}}`
 inserts the helper's HTML. `weberl_form:open(Token, Action[, Opts])` returns `<form method="post"
 action="...">` plus the hidden `_csrf` input; `#{csrf => false}` leaves the input out (and needs no
 token), `method => get` never carries one, `enctype` and `attrs` add attributes (escaped), and an
@@ -616,8 +616,9 @@ beside it is an error at router start (`{unassociated_templates, Files}`).
 | | |
 |---|---|
 | literal HTML and text | copied as is |
-| `{{ name }}` | value, HTML-escaped |
-| `{{{ name }}}` | value, **not** escaped. Unsafe for untrusted input |
+| `{{ @name }}` | the assign `name`, HTML-escaped |
+| `{{ Expr }}` | any Erlang expression, HTML-escaped: `{{ @n + 1 }}`, `{{ string:uppercase(@name) }}` |
+| `{{{ Expr }}}` | the same, **not** escaped. Unsafe for untrusted input |
 | `\{{` | literal `{{` |
 | `{: region name :}` ... `{: /region name :}` | a [region](#regions) |
 | `{: region name tag=tbody :}` | a region wrapped in that element |
@@ -626,12 +627,24 @@ beside it is an error at router start (`{unassociated_templates, Files}`).
 | `{: fill name :}` ... `{: /fill name :}` | in a view: replaces the layout's slot of that name |
 | `\{:` | literal `{:` |
 
-`{{ }}` is for values only; statements use `{: :}`. Names match `[a-z][a-zA-Z0-9_]*` and are looked up as atom keys in the assigns
-map. There are no expressions, conditionals, loops, includes, components
-or filters in this version.
+`{{ }}` is for values only; statements use `{: :}`. What is inside is an **Erlang expression**, and
+the only way to read an assign is `@name` (`[a-z][a-zA-Z0-9_]*`, looked up as an atom key in the
+assigns map; a missing one is `{missing_variable, View, Name}`). There is **no shorthand**: a bare
+`{{ name }}` is the atom `name` and renders as the text `name`. Capitalized names are local variables,
+which will be bound by blocks (a local that nothing binds is a compile error, `{unbound_variable,
+Name}`). An `@` inside a string, a quoted atom, a character literal or a comment is just text.
+Expressions are developer code, evaluated on every render (and every region re-render): keep them pure
+and cheap. User input is rendered, never evaluated. There are no conditionals, loops, includes,
+components or filters in this version.
 
-Supported values: UTF-8 binaries, character lists, integers, floats, `true` and
-`false` (rendered as text). Escaping covers `& < > " '`.
+The tag ends at the first `}}` (`}}}` for the raw form), so two closing braces of the expression itself
+need a space between them: `{{ maps:get(k, #{k => #{j => 1} }) }}`. Expressions may span lines; a
+syntax error reports the template line of the offending token (`{invalid_expression, Text,
+Message}`), `{{ 1, 2 }}` is `{not_a_single_expression, Text}`.
+
+Supported values (what an expression may evaluate to): UTF-8 binaries, character lists, integers,
+floats and atoms (rendered as their name, so `true`, `false` and `undefined` render as such). Escaping
+covers `& < > " '`.
 
 Interpolation is allowed in **HTML text** and in **quoted attribute values**
 (escaped only). Escaping alone is not enough in JavaScript, CSS or URLs, so these
@@ -648,8 +661,9 @@ weberl_template:try_render(home_view, Assigns) -> {ok, iodata()} | {error, Reaso
 ```
 
 `render/2` raises `error({template_error, Reason})` with `{missing_variable, View,
-Name}`, `{unsupported_value, View, Name, Value}`, `{invalid_assigns, View, Assigns}`
-or `{no_template, View}`. Inside a handler this becomes a logged 500.
+Name}`, `{unsupported_value, View, Source, Value}` (`Source` is the expression as written,
+for example `<<"@title">>`), `{invalid_assigns, View, Assigns}` or `{no_template, View}`. Inside a
+handler this becomes a logged 500.
 
 ### Regions
 
@@ -657,9 +671,9 @@ A region is a part of the page the server can re-render on its own and the brows
 can swap, without re-sending the page (see [Updating a region](#updating-a-region)):
 
 ```text
-<h1>{{ title }}</h1>
+<h1>{{ @title }}</h1>
 {: region cart :}
-  <ul>{{{ items_html }}}</ul>
+  <ul>{{{ @items_html }}}</ul>
 {: /region cart :}
 ```
 
@@ -694,7 +708,7 @@ A layout is a template with one `{: content :}` where a view's template goes, so
 <!-- src/layouts/main.weberl -->
 <!DOCTYPE html>
 <html lang="en">
-<head><title>{{ title }}</title></head>
+<head><title>{{ @title }}</title></head>
 <body>
   <nav>...</nav>
 {: content :}
@@ -745,7 +759,7 @@ styles in `<head>`, a sidebar) the layout declares slots, and the view fills the
 ```html
 <!-- layout -->
 <head>
-  <title>{{ title }}</title>
+  <title>{{ @title }}</title>
   {: slot head :}{: /slot head :}
 </head>
 <body>{: content :}</body>
@@ -777,8 +791,9 @@ Compile errors (all `{syntax_error, File, Line, Reason}`): `{unknown_fill, Name,
 ### Compile errors
 
 Errors carry file and line, e.g. `{syntax_error, "src/views/home_view.weberl", 3,
-unterminated_interpolation}`; other reasons are `{invalid_variable_name, Text}`,
-`unterminated_raw_interpolation`, `{interpolation_in_unsupported_context, Where}`,
+unterminated_interpolation}`; other reasons are `empty_interpolation`,
+`{invalid_expression, Text, Message}`, `{not_a_single_expression, Text}`, `{unbound_variable, Name}`,
+`{reserved_variable, Name}` (names starting `_Weberl_` are the engine's), `unterminated_raw_interpolation`, `{interpolation_in_unsupported_context, Where}`,
 `{interpolation_in_restricted_attribute, Attr}`, `{raw_interpolation_in_attribute,
 Attr}`, `{invalid_utf8, File}`, and for regions `unterminated_block_tag`,
 `{invalid_block_tag, Text}`, `{invalid_region_tag, Tag}`, `{unclosed_region, Name}`,

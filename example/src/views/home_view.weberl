@@ -1,9 +1,9 @@
     <main class="home">
-        <h1>{{ title }}</h1>
-        <p>{{ description }}</p>
-        <p>Visits: {{ visits }}</p>
-        <p title="{{ untrusted }}">Escaped: {{ untrusted }}</p>
-        <p>Raw: {{{ snippet }}}</p>
+        <h1>{{ @title }}</h1>
+        <p>{{ @description }}</p>
+        <p>Visits: {{ @visits }}</p>
+        <p title="{{ @untrusted }}">Escaped: {{ @untrusted }}</p>
+        <p>Raw: {{{ @snippet }}}</p>
         <a href="/about">About</a>
         <a href="/clock">Clock</a>
         <a href="/counter">Counter</a>

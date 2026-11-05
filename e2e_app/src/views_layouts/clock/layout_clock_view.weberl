@@ -3,5 +3,5 @@
     <script src="/static/clock.js" defer></script>
 {: /fill head :}
     <h1>Clock</h1>
-    <p>Server time: <span id="time">{{ time }}</span></p>
+    <p>Server time: <span id="time">{{ @time }}</span></p>
     <a href="/">Home</a>

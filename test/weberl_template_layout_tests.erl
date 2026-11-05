@@ -69,16 +69,16 @@ layout_validation_test_() ->
 
 renders_view_inside_layout_test() ->
     with_tmp(fun(Dir) ->
-        L = layout(Dir, <<"<title>{{ title }}</title><nav>{{ user }}</nav>{: content :}<footer/>">>),
-        V = compile(L, <<"<h1>{{ title }}</h1>">>),
+        L = layout(Dir, <<"<title>{{ @title }}</title><nav>{{ @user }}</nav>{: content :}<footer/>">>),
+        V = compile(L, <<"<h1>{{ @title }}</h1>">>),
         ?assertEqual(<<"<title>Hi</title><nav>ann</nav><h1>Hi</h1><footer/>">>,
                      bin(weberl_template:render(V, #{title => <<"Hi">>, user => <<"ann">>})))
     end).
 
 variables_of_both_are_required_test() ->
     with_tmp(fun(Dir) ->
-        L = layout(Dir, <<"{{ user }}{: content :}">>),
-        V = compile(L, <<"{{ title }}">>),
+        L = layout(Dir, <<"{{ @user }}{: content :}">>),
+        V = compile(L, <<"{{ @title }}">>),
         ?assertError({template_error, {missing_variable, V, user}},
                      weberl_template:render(V, #{title => <<"x">>})),
         ?assertEqual([title, user], maps:get(variables, (generated(V)):info()))
@@ -90,13 +90,13 @@ view_is_still_checked_test() ->
     with_tmp(fun(Dir) ->
         L = layout(Dir, <<"{: content :}">>),
         ?assertMatch({error, {syntax_error, "page.weberl", 1, {interpolation_in_unsupported_context, _}}},
-                     compile(L, <<"<script>{{ x }}</script>">>))
+                     compile(L, <<"<script>{{ @x }}</script>">>))
     end).
 
 regions_of_layout_and_view_test() ->
     with_tmp(fun(Dir) ->
-        L = layout(Dir, <<"{: region nav :}<b>{{ user }}</b>{: /region nav :}{: content :}">>),
-        V = compile(L, <<"{: region body :}{{ text }}{: /region body :}">>),
+        L = layout(Dir, <<"{: region nav :}<b>{{ @user }}</b>{: /region nav :}{: content :}">>),
+        V = compile(L, <<"{: region body :}{{ @text }}{: /region body :}">>),
         {ok, Regions} = weberl_template:regions(V),
         ?assertEqual([body, nav], lists:sort(maps:keys(Regions))),
         ?assertEqual(<<"<b>ann</b>">>, bin(weberl_template:render_region(V, nav, #{user => <<"ann">>}))),
@@ -144,8 +144,8 @@ default_and_filled_slot_test() ->
         Plain = compile(L, <<"<p>hi</p>">>),
         ?assertEqual(<<"<head><title>default</title></head><body><p>hi</p></body>">>,
                      bin(weberl_template:render(Plain, #{}))),
-        Filled = compile(L, <<"{: fill head :}<title>{{ t }}</title>{: /fill head :}<p>hi</p>"
-                              "{: fill foot :}<i>{{ n }}</i>{: /fill foot :}">>),
+        Filled = compile(L, <<"{: fill head :}<title>{{ @t }}</title>{: /fill head :}<p>hi</p>"
+                              "{: fill foot :}<i>{{ @n }}</i>{: /fill foot :}">>),
         ?assertEqual(<<"<head><title>T</title></head><body><p>hi</p><i>1</i></body>">>,
                      bin(weberl_template:render(Filled, #{t => <<"T">>, n => 1})))
     end).
@@ -159,7 +159,7 @@ only_fills_test() ->
 
 replaced_default_needs_no_variables_test() ->
     with_tmp(fun(Dir) ->
-        L = layout(Dir, <<"{: slot s :}{{ d }}{: /slot s :}{: content :}">>),
+        L = layout(Dir, <<"{: slot s :}{{ @d }}{: /slot s :}{: content :}">>),
         V = compile(L, <<"{: fill s :}x{: /fill s :}">>),
         ?assertEqual(<<"x">>, bin(weberl_template:render(V, #{}))),
         ?assertEqual([], maps:get(variables, (generated(V)):info())),
@@ -170,14 +170,14 @@ replaced_default_needs_no_variables_test() ->
 slot_inside_layout_region_test() ->
     with_tmp(fun(Dir) ->
         L = layout(Dir, <<"{: region bar :}{: slot s :}d{: /slot s :}{: /region bar :}{: content :}">>),
-        V = compile(L, <<"{: fill s :}{{ x }}{: /fill s :}">>),
+        V = compile(L, <<"{: fill s :}{{ @x }}{: /fill s :}">>),
         ?assertEqual(<<"v">>, bin(weberl_template:render_region(V, bar, #{x => <<"v">>})))
     end).
 
 region_in_fill_test() ->
     with_tmp(fun(Dir) ->
         L = layout(Dir, <<"{: slot s :}{: /slot s :}{: content :}">>),
-        V = compile(L, <<"{: fill s :}{: region r :}{{ x }}{: /region r :}{: /fill s :}">>),
+        V = compile(L, <<"{: fill s :}{: region r :}{{ @x }}{: /region r :}{: /fill s :}">>),
         {ok, #{r := #{variables := [x]}}} = weberl_template:regions(V),
         ?assertEqual(<<"1">>, bin(weberl_template:render_region(V, r, #{x => 1})))
     end).
@@ -203,7 +203,7 @@ slot_errors_test() ->
         ?assertEqual(E(1, {slot_outside_layout, head}),
                      compile(L, <<"{: slot head :}{: /slot head :}">>)),
         ?assertEqual(E(1, {interpolation_in_unsupported_context, <<"script">>}),
-                     compile(L, <<"{: fill head :}<script>{{ x }}</script>{: /fill head :}">>))
+                     compile(L, <<"{: fill head :}<script>{{ @x }}</script>{: /fill head :}">>))
     end).
 
 standalone_template_errors_test() ->
@@ -270,7 +270,7 @@ setup(Name, Opts, Tpl, Layouts) ->
 
 route_layout() ->
     with_tmp(fun(Dir) ->
-        {V, Files} = setup("m", "#{layout => main}", <<"<p>{{ t }}</p>">>,
+        {V, Files} = setup("m", "#{layout => main}", <<"<p>{{ @t }}</p>">>,
                            [{"layouts/main.weberl", <<"<body>{: content :}</body>">>}]),
         write_tree(Dir, Files),
         compile_load(filename:join(Dir, "views/" ++ V ++ ".erl")),
@@ -281,7 +281,7 @@ route_layout() ->
 
 standalone() ->
     with_tmp(fun(Dir) ->
-        {V, Files} = setup("s", "#{}", <<"<p>{{ t }}</p>">>,
+        {V, Files} = setup("s", "#{}", <<"<p>{{ @t }}</p>">>,
                            [{"layouts/main.weberl", <<"<body>{: content :}</body>">>}]),
         write_tree(Dir, Files),
         compile_load(filename:join(Dir, "views/" ++ V ++ ".erl")),
@@ -291,7 +291,7 @@ standalone() ->
 
 layout_in_views() ->
     with_tmp(fun(Dir) ->
-        {V, Files} = setup("v", "#{layout => main}", <<"<p>{{ t }}</p>">>,
+        {V, Files} = setup("v", "#{layout => main}", <<"<p>{{ @t }}</p>">>,
                            [{"views/layouts/main.weberl", <<"<body>{: content :}</body>">>}]),
         write_tree(Dir, Files),
         compile_load(filename:join(Dir, "views/" ++ V ++ ".erl")),

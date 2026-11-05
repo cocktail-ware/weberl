@@ -197,10 +197,22 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   the assign shorthand, a bare capitalized name is a local; the tag ends at the first `}}` (`}}}` for raw), so an
   expression containing `}}` (nested maps) needs a space (`} }`); dependencies are its `@names`; the HTML
   context rules apply as for names; an unsupported result is `{unsupported_value, View, Source, Value}`
-  (Source: the name atom, or the expression text for expressions). **Build stages**: 1 expression module,
-  2 lexer, 3 parser and validation (AST, branch/context rules, scope pass, region rules), 4 layout composition
-  through blocks, 5 compiler and runtime, 6 README, `TEMPLATE_BLOCKS.md`, agentic feedback. Item 3 (safe URLs)
-  follows and depends on this.
+  (Source: the name atom, or the expression text for expressions). **Decision 8 revised (user, 2026-11-05):
+  the lowercase assign shorthand is dropped.** `{{ ... }}` always holds an Erlang expression; an assign is
+  only ever `@name` (`{{ @title }}`, `{{{ @html }}}`); `{{ name }}` is the atom `name` and renders as the text
+  `name`; `{{ Name }}` is a local variable. **Breaking** for every existing template (`{{ title }}` becomes
+  `{{ @title }}`): migrated in the repository (examples, e2e_app, tests, README) and the agentic project must
+  do the same. Values rendered: binaries, character lists, integers, floats and atoms (so `true`/`false`/
+  `undefined` render as their names). `unsupported_value` now names the expression text
+  (`{unsupported_value, View, <<"@title">>, Value}`). **Build stages (re-planned)**: 1 expression module
+  (done); 2 `{{ Expr }}` end to end: lexer, parser, compiler, runtime, template migration (keeps the suite
+  green; free locals are errors until blocks bind them) **DONE, 786 eunit tests** (lexer hands over the raw
+  text, `{interp, Line, Mode, Text}`; AST node `{expr, Line, Mode, Parsed}`; `weberl_template_runtime`
+  `assign/3`, `escaped/3`, `raw/3` take `(Value, View, Source)`; atoms render; templates, tests, README and
+  agentic's feedback file migrated/updated; the example app was started and renders; the e2e_app only
+  compiled, its browser suite was not re-run; agentic's own `.weberl` files still need the rewrite); 3 block tags: lexer, parser, validation, scope pass,
+  region rules; 4 layout composition through blocks; 5 compiler and runtime for blocks; 6 README,
+  `TEMPLATE_BLOCKS.md`, agentic feedback. Item 3 (safe URLs) follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

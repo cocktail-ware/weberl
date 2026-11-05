@@ -1,22 +1,34 @@
 %% @doc Runtime support called from generated template modules.
 %%
+%% `assign/3' reads an assign (`@name' in a template): a missing one raises
+%% `error({template_error, {missing_variable, View, Name}})'. `escaped/3' and
+%% `raw/3' turn the value of an interpolation (`{{ Expr }}', `{{{ Expr }}}') into
+%% text.
+%%
 %% Supported value types: UTF-8 binaries, character lists, integers, floats and
-%% booleans. A missing variable or any other value raises
-%% `error({template_error, Reason})' with Reason
-%% `{missing_variable, View, Name}' or `{unsupported_value, View, Name, Value}'
-%% (arbitrary terms are never rendered).
+%% atoms (rendered as their name, so `true', `false' and `undefined' render as
+%% such). Any other value raises
+%% `error({template_error, {unsupported_value, View, Source, Value}})', `Source'
+%% being the text of the expression (arbitrary terms are never rendered).
 %%
 %% `escaped/3' escapes `& < > " ''. `raw/3' does not and is unsafe for
 %% untrusted input.
 -module(weberl_template_runtime).
 
--export([escaped/3, raw/3, escape/1]).
+-export([assign/3, escaped/3, raw/3, escape/1]).
 
--spec escaped(atom(), map(), module()) -> binary().
-escaped(Name, Assigns, View) -> escape(value(Name, Assigns, View)).
+-spec assign(atom(), map(), module()) -> term().
+assign(Name, Assigns, View) ->
+    case maps:find(Name, Assigns) of
+        {ok, Value} -> Value;
+        error -> erlang:error({template_error, {missing_variable, View, Name}})
+    end.
 
--spec raw(atom(), map(), module()) -> binary().
-raw(Name, Assigns, View) -> value(Name, Assigns, View).
+-spec escaped(term(), module(), binary()) -> binary().
+escaped(Value, View, Source) -> escape(to_binary(Value, View, Source)).
+
+-spec raw(term(), module(), binary()) -> binary().
+raw(Value, View, Source) -> to_binary(Value, View, Source).
 
 -spec escape(binary()) -> binary().
 escape(Bin) ->
@@ -32,29 +44,22 @@ esc($") -> <<"&quot;">>;
 esc($') -> <<"&#39;">>;
 esc(C) -> <<C>>.
 
-value(Name, Assigns, View) ->
-    case maps:find(Name, Assigns) of
-        {ok, V} -> to_binary(V, Name, View);
-        error -> erlang:error({template_error, {missing_variable, View, Name}})
-    end.
-
-to_binary(V, Name, View) when is_binary(V) ->
+to_binary(V, View, Source) when is_binary(V) ->
     case unicode:characters_to_binary(V, utf8, utf8) of
         B when is_binary(B) -> B;
-        _ -> unsupported(V, Name, View)
+        _ -> unsupported(V, View, Source)
     end;
-to_binary(V, Name, View) when is_list(V) ->
+to_binary(V, View, Source) when is_list(V) ->
     try unicode:characters_to_binary(V) of
         B when is_binary(B) -> B;
-        _ -> unsupported(V, Name, View)
+        _ -> unsupported(V, View, Source)
     catch
-        error:badarg -> unsupported(V, Name, View)
+        error:badarg -> unsupported(V, View, Source)
     end;
 to_binary(V, _, _) when is_integer(V) -> integer_to_binary(V);
 to_binary(V, _, _) when is_float(V) -> float_to_binary(V, [short]);
-to_binary(true, _, _) -> <<"true">>;
-to_binary(false, _, _) -> <<"false">>;
-to_binary(V, Name, View) -> unsupported(V, Name, View).
+to_binary(V, _, _) when is_atom(V) -> atom_to_binary(V, utf8);
+to_binary(V, View, Source) -> unsupported(V, View, Source).
 
-unsupported(V, Name, View) ->
-    erlang:error({template_error, {unsupported_value, View, Name, V}}).
+unsupported(V, View, Source) ->
+    erlang:error({template_error, {unsupported_value, View, Source, V}}).

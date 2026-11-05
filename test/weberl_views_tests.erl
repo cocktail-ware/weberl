@@ -88,10 +88,10 @@ renders_templates() ->
         write_tree(Dir,
                    [{Home ++ ".erl", view_src(Home, "#{title => <<\"Welcome\">>, "
                                                    "description => <<\"Built with Weberl\">>}")},
-                    {Home ++ ".weberl", <<"<main class=\"home\">\n    <h1>{{ title }}</h1>\n"
-                                          "    <p>{{ description }}</p>\n</main>\n">>},
+                    {Home ++ ".weberl", <<"<main class=\"home\">\n    <h1>{{ @title }}</h1>\n"
+                                          "    <p>{{ @description }}</p>\n</main>\n">>},
                     {"about/" ++ About ++ ".erl", view_src(About, "#{year => 2026}")},
-                    {"about/" ++ About ++ ".weberl", <<"<h1>About</h1><p>Since {{ year }}</p>">>}]),
+                    {"about/" ++ About ++ ".weberl", <<"<h1>About</h1><p>Since {{ @year }}</p>">>}]),
         [compile_load(filename:join(Dir, F)) || F <- [Home ++ ".erl", "about/" ++ About ++ ".erl"]],
         Name = router_name(),
         {ok, _} = weberl:start_link(Name, fs_router(Dir), listener()),
@@ -116,7 +116,7 @@ mixed_views() ->
                     {"esc/" ++ Esc ++ ".erl",
                      view_src(Esc, "#{name => <<\"<script>alert('x')</script>\">>, "
                                    "html => <<\"<em>ok</em>\">>}")},
-                    {"esc/" ++ Esc ++ ".weberl", <<"<p title=\"{{ name }}\">{{ name }}</p>{{{ html }}}">>}]),
+                    {"esc/" ++ Esc ++ ".weberl", <<"<p title=\"{{ @name }}\">{{ @name }}</p>{{{ @html }}}">>}]),
         [compile_load(filename:join(Dir, F)) || F <- [Plain ++ ".erl", "esc/" ++ Esc ++ ".erl"]],
         Name = router_name(),
         {ok, _} = weberl:start_link(Name, fs_router(Dir), listener()),
@@ -134,7 +134,7 @@ declarative_next_to_views() ->
     with_tmp(fun(Dir) ->
         Home = view_name("home"),
         write_tree(Dir, [{Home ++ ".erl", view_src(Home, "#{n => 1}")},
-                         {Home ++ ".weberl", <<"home {{ n }}">>}]),
+                         {Home ++ ".weberl", <<"home {{ @n }}">>}]),
         compile_load(filename:join(Dir, Home ++ ".erl")),
         Health = weberl_test_handlers:unique("health"),
         weberl_test_handlers:load(
@@ -157,7 +157,7 @@ declarative_next_to_views() ->
 missing_variable_is_500() ->
     with_tmp(fun(Dir) ->
         V = view_name("miss"),
-        write_tree(Dir, [{V ++ ".erl", view_src(V, "#{}")}, {V ++ ".weberl", <<"{{ nope }}">>}]),
+        write_tree(Dir, [{V ++ ".erl", view_src(V, "#{}")}, {V ++ ".weberl", <<"{{ @nope }}">>}]),
         compile_load(filename:join(Dir, V ++ ".erl")),
         Name = router_name(),
         {ok, _} = weberl:start_link(Name, fs_router(Dir), listener()),
@@ -207,13 +207,13 @@ invalid_template() ->
 not_reread() ->
     with_tmp(fun(Dir) ->
         V = view_name("cached"),
-        write_tree(Dir, [{V ++ ".erl", view_src(V, "#{v => 1}")}, {V ++ ".weberl", <<"v={{ v }}">>}]),
+        write_tree(Dir, [{V ++ ".erl", view_src(V, "#{v => 1}")}, {V ++ ".weberl", <<"v={{ @v }}">>}]),
         compile_load(filename:join(Dir, V ++ ".erl")),
         Name = router_name(),
         {ok, _} = weberl:start_link(Name, fs_router(Dir), listener()),
         try
             ?assertMatch({200, _, <<"v=1">>}, get(Name, "/")),
-            ok = file:write_file(filename:join(Dir, V ++ ".weberl"), <<"changed {{ v }}">>),
+            ok = file:write_file(filename:join(Dir, V ++ ".weberl"), <<"changed {{ @v }}">>),
             ?assertMatch({200, _, <<"v=1">>}, get(Name, "/")),
             ok = file:delete(filename:join(Dir, V ++ ".weberl")),
             ?assertMatch({200, _, <<"v=1">>}, get(Name, "/"))
