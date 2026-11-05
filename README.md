@@ -103,16 +103,26 @@ src/
 │   └── weberl_table.erl        assembly, precedence, lookup
 ├── handler/
 │   ├── weberl_handler.erl      behaviour, startup checks
-│   ├── weberl_request.erl      request record
-│   ├── weberl_response.erl     response record
-│   └── weberl_dispatch.erl     request -> response
+│   ├── weberl_request.erl      request record (cookies, form, session through the adapter)
+│   ├── weberl_response.erl     response record (headers, cookies, redirect, session)
+│   ├── weberl_dispatch.erl     request -> response (CSRF check, session loading and writing)
+│   ├── weberl_cookie.erl       validated Set-Cookie serializer
+│   ├── weberl_csrf.erl         Origin check, signed double-submit token
+│   ├── weberl_form.erl         form tag with the CSRF field
+│   ├── weberl_session.erl      the encrypted session cookie
+│   ├── weberl_flash.erl        flash on top of the session
+│   ├── weberl_sign.erl         the signing/encryption key shared by tokens and sessions
+│   └── weberl_url.erl          is a redirect target a path on this site
 ├── template/
 │   ├── weberl_template.erl             public API: render, compile, discover
-│   ├── weberl_template_lexer.erl
-│   ├── weberl_template_parser.erl      parse + validate
+│   ├── weberl_template_lexer.erl       text, {{ }}, {: :} tags
+│   ├── weberl_template_parser.erl      parse (blocks, scope) + validate
 │   ├── weberl_template_html.erl        HTML context tracking
+│   ├── weberl_template_layout.erl      layouts: content, slots, fills
 │   ├── weberl_template_compiler.erl    AST -> generated module
-│   └── weberl_template_runtime.erl     value conversion, escaping
+│   ├── weberl_template_runtime.erl     assign lookup, value conversion, escaping
+│   └── blocks/
+│       └── weberl_blocks_expr.erl      Erlang expressions in tags; no Weberl dependency (TEMPLATE_BLOCKS.md)
 ├── live/                       live pages
 │   ├── weberl_live.erl         public API: open, push, publish, update, mount, assign, stats
 │   ├── weberl_view_data.erl    what a session keeps for its page (assigns, private)
@@ -734,8 +744,13 @@ weberl_template:try_render(home_view, Assigns) -> {ok, iodata()} | {error, Reaso
 
 `render/2` raises `error({template_error, Reason})` with `{missing_variable, View,
 Name}`, `{unsupported_value, View, Source, Value}` (`Source` is the expression as written,
-for example `<<"@title">>`), `{invalid_assigns, View, Assigns}` or `{no_template, View}`. Inside a
-handler this becomes a logged 500.
+for example `<<"@title">>`), `{not_boolean, View, Line, Value}` and `{case_clause, View, Line, Value}`
+(see [blocks](#conditionals-case-and-loops)), `{invalid_assigns, View, Assigns}` or `{no_template, View}`.
+An expression that raises (a `for` over something that is not a list, a division by zero) propagates as
+the Erlang error. Inside a handler any of these becomes a logged 500. `try_render/2` and
+`try_render_region/3` (what a live page uses to re-render a region) return the failure instead, an
+expression that raises as `{error, {render_failed, Class, Reason}}`, so one bad value is logged and does
+not end the page's session.
 
 ### Regions
 
@@ -1333,7 +1348,8 @@ See `ROADMAP.md` for the running list. Notable points:
 - A router process killed without cleanup leaves its listener serving until the
   same router name is started again.
 - No dynamic or wildcard routes, middleware execution, authentication,
-  nested layouts, components, loops or conditionals in templates, and no hot reloading.
+  nested layouts or components in templates, blocks (`if`, `case`, `for`) inside tags and attributes,
+  and no hot reloading.
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.
@@ -1346,6 +1362,7 @@ See `ROADMAP.md` for the running list. Notable points:
 |---|---|
 | `README.md` | this document: usage, architecture, limitations |
 | `MILESTONE_2.md` | the Milestone 2 specification (kept in sync with what was built) |
+| `TEMPLATE_BLOCKS.md` | the template block language (`{{ Expr }}`, `if`, `case`, `for`): semantics, generated code, hooks, reuse by another library |
 | `ROADMAP.md` | deferred work and things to revisit |
 | `E2E_ROADMAP.md` | plan for the future browser (end-to-end) test suite |
 | `PROCESSES.md` | convention for long-running processes (`gen_statem`), followed by `weberl_router_server` |

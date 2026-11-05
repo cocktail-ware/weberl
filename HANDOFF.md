@@ -223,9 +223,18 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   cannot call a function, so the assigns read by the guards of a `case` are fetched first and passed as the
   arguments of a fun that holds the `case` (a missing one raises even if an earlier clause would match, and
   no "unsafe variable" clash between sibling cases); `weberl_template_parser:children/1`, `map_children/2`,
-  `check_scope/2`; layout composition looks through blocks. Not done: README section is written, but
-  `TEMPLATE_BLOCKS.md`, the live-page behaviour with blocks (only the unit-level region rendering is
-  tested; a browser/live test of "conditional inside a region" is not), and agentic's feedback update; 3 block tags: lexer, parser, validation, scope pass,
+  `check_scope/2`; layout composition looks through blocks. **Verified (2026-11-05)**: live test
+  `weberl_live_blocks_tests` (conditional, loop and case inside regions re-render on assign and are pushed; an
+  `if` outside a region is not; a region in a branch) found a real bug, fixed: `try_render/2` and
+  `try_render_region/3` now catch any exception from an expression and return
+  `{error, {render_failed, Class, Reason}}` (before, a `for` over a non-list killed the live session);
+  853 eunit tests; the e2e suite (`test/e2e/run.sh all`, Chromium) passed: 30 specs plain, 34 layouts, plus the JS
+  unit tests. `TEMPLATE_BLOCKS.md` written (README links it); agentic's `WEBERL_FEEDBACK.md` updated. **Honest
+  gap against decision 7**: only `weberl_blocks_expr` is separated from Weberl; block lexing/structure, the
+  scope pass and the `if`/`case`/`for` code generation still live in `weberl_template_lexer`/`_parser`/`_compiler`
+  next to regions and the HTML walker (TEMPLATE_BLOCKS.md says so); moving them behind host hooks is the
+  remaining extraction work. No e2e spec exercises blocks in a real browser (the live test covers the server
+  side; the browser patching of regions is covered by the existing region specs); 3 block tags: lexer, parser, validation, scope pass,
   region rules; 4 layout composition through blocks; 5 compiler and runtime for blocks; 6 README,
   `TEMPLATE_BLOCKS.md`, agentic feedback. Item 3 (safe URLs) follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an

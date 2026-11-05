@@ -217,6 +217,21 @@ a_value_that_is_not_a_list_is_erlangs_error_test() ->
     V = tpl(<<"{: for X <- @l :}{{ X }}{: /for :}">>),
     ?assertError({bad_generator, notalist}, weberl_template:render(V, #{l => notalist})).
 
+%% render/2 raises (a handler's 500); the try_ variants, which a live page uses to
+%% re-render a region, return the failure so one bad value does not end the session.
+the_try_variants_return_a_failing_expression_test() ->
+    V = tpl(<<"{: region r :}{: for X <- @l :}{{ X }}{: /for :}{: /region r :}">>),
+    ?assertEqual({error, {render_failed, error, {bad_generator, notalist}}},
+                 weberl_template:try_render(V, #{l => notalist})),
+    ?assertEqual({error, {render_failed, error, {bad_generator, notalist}}},
+                 weberl_template:try_render_region(V, r, #{l => notalist})),
+    ?assertEqual({error, {render_failed, error, badarith}},
+                 weberl_template:try_render(tpl(<<"{{ 1 div @z }}">>), #{z => 0})),
+    %% template errors keep their own shape
+    ?assertEqual({error, {missing_variable, V, l}}, weberl_template:try_render(V, #{})),
+    ?assertEqual(<<"<weberl-region name=\"r\">12</weberl-region>">>,
+                 iolist_to_binary(element(2, weberl_template:try_render(V, #{l => [1, 2]})))).
+
 for_errors_test() ->
     ?assertMatch({1, {invalid_expression, _, _}}, err(<<"{: for X <- :}a{: /for :}">>)),
     ?assertEqual({1, {rebound_variable, 'X'}}, err(<<"{: for X <- @a, X <- @b :}a{: /for :}">>)),

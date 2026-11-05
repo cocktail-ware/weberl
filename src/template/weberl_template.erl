@@ -73,12 +73,17 @@ render(View, Assigns) when is_atom(View), is_map(Assigns) ->
 render(View, Assigns) ->
     erlang:error({template_error, {invalid_assigns, View, Assigns}}).
 
+%% @doc Like {@link render/2}, returning `{error, Reason}' instead of raising. An
+%% expression of the template that raises (a `for' over something that is not a
+%% list, a division by zero...) is `{error, {render_failed, Class, Reason}}': the
+%% template is developer code, but one bad value must not take down the caller.
 -spec try_render(module(), map()) -> {ok, iodata()} | {error, term()}.
 try_render(View, Assigns) ->
     try
         {ok, render(View, Assigns)}
     catch
-        error:{template_error, Reason} -> {error, Reason}
+        error:{template_error, Reason} -> {error, Reason};
+        Class:Reason -> {error, {render_failed, Class, Reason}}
     end.
 
 %% @doc Render the content of one region (what the browser puts inside the
@@ -96,12 +101,16 @@ render_region(View, Region, Assigns) when is_atom(View), is_atom(Region), is_map
 render_region(View, _Region, Assigns) ->
     erlang:error({template_error, {invalid_assigns, View, Assigns}}).
 
+%% @doc Like {@link render_region/3}, returning `{error, Reason}' instead of
+%% raising; what a live page uses to re-render a region, so a failing expression
+%% is logged and the page's session goes on (see {@link try_render/2}).
 -spec try_render_region(module(), atom(), map()) -> {ok, iodata()} | {error, term()}.
 try_render_region(View, Region, Assigns) ->
     try
         {ok, render_region(View, Region, Assigns)}
     catch
-        error:{template_error, Reason} -> {error, Reason}
+        error:{template_error, Reason} -> {error, Reason};
+        Class:Reason -> {error, {render_failed, Class, Reason}}
     end.
 
 %% @doc The regions of a view's template with their variables
