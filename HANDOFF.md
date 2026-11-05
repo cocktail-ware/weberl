@@ -297,6 +297,15 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   - warnings are returned with the compile result and logged by `weberl_views:prepare` with file and line.
   - known limit: a view mounted in two routers with different tables is compiled against the router that started
     last; the render-time check uses the request's own router.
+- **Built so far (decisions 8 to 10).** Step 1: the tag-end scanner (`89fcbca`). Step 2: `weberl_url` helpers
+  (`ensure_path`, `url`, `component`, `query`, `unsafe_url`, `router_path/1,2`, `router_url/1,2`, tagged value
+  `{weberl_url, Kind, Binary}`, `is_tagged/kind/data`, `with_router/2`, `ambient_router/0`), tests in
+  `weberl_url_helpers_tests`. Terms as built (helper level, `error:{template_error, Reason}`): `{not_a_path, V}`,
+  `{not_a_url, V}`, `{bad_url_value, V}`, `{bad_url_option, Opt}`, `{unknown_route, Path}`, `no_router` and
+  `no_public_url` (atoms, not one-tuples), `{router_not_running, Name}`, `{bad_public_url, V}`. `router_path`'s
+  second argument is the options map (`router`, `query`, `no_warn`); `query` replaces the query argument of
+  decision 8. Still to build: step 3 compile-time analysis (routes option, placeholders, attribute policy,
+  warnings), step 4 render-time policy and ambient router set by dispatch and live sessions, README/guides.
 - **Decision 10 (tag ends are found by an Erlang-aware scanner; user, 2026-11-05).** Replaces "a tag ends at the
   first `}}`/`:}`". Delimiters stay `{{ }}`, `{{{ }}}`, `{: :}` (alternatives `{: :}`/`{:: ::}` for
   interpolation and a plain `{{`/`}}` counter were considered and rejected: the counter breaks on
