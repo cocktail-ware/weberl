@@ -4,20 +4,18 @@
 %%
 %% Layouts are the `.weberl' files below the router's `layouts' directories,
 %% named by their base name (`layouts/main.weberl' is `main'). A view selects
-%% one in its route options, `-weberl_route(#{layout => main}).' (the metadata
-%% form, `weberl_metadata() -> #{layout => main}', is still accepted; both may be
-%% given when they agree); a view without a layout is a standalone page. Layouts
-%% are composed when the router starts, so the choice is per view, not per
-%% request. Layout files are not associated with views, so they may also live
-%% below a filesystem root.
+%% one in its route options, `-weberl_route(#{layout => main}).'; a view without a
+%% layout is a standalone page. Layouts are composed when the router starts, so
+%% the choice is per view, not per request. Layout files are not associated with
+%% views, so they may also live below a filesystem root.
 %%
 %% All templates are compiled before any is loaded, so a router either gets all
 %% its templates or none are replaced. Errors:
 %% `{unassociated_templates, Files}', `{duplicate_template_associations, _}',
 %% `{duplicate_layouts, [{Name, Files}]}', `{invalid_layouts, [{Name, Reason}]}',
 %% `{invalid_templates, [{View, Reason}]}' (Reason may be `{unknown_layout, Name}',
-%% `layout_without_template', `{conflicting_layout, RouteLayout, MetadataLayout}'
-%% or, for a declarative route that names a layout, `layout_needs_a_filesystem_view':
+%% `layout_without_template' or, for a declarative route that names a layout,
+%% `layout_needs_a_filesystem_view':
 %% only filesystem views have templates).
 -module(weberl_views).
 
@@ -29,15 +27,14 @@ prepare(Router, Table) ->
     Routes = weberl_table:routes(Table),
     FsRoutes = [R || R <- Routes, weberl_route:origin(R) =:= filesystem],
     Views = [{weberl_route:handler(R), weberl_route:source(R)} || R <- FsRoutes],
-    %% View => {ok, Layout} | none, or the reason it cannot be decided
-    Selected = [{weberl_route:handler(R), selected(weberl_route:handler(R), weberl_route:layout(R))}
-                || R <- FsRoutes],
+    %% View => {ok, Layout} | none: what the view's route options say
+    Selected = maps:from_list([{weberl_route:handler(R), weberl_route:layout(R)} || R <- FsRoutes]),
     Misplaced = [{weberl_route:handler(R), layout_needs_a_filesystem_view}
                  || R <- Routes, weberl_route:origin(R) =/= filesystem,
                     weberl_route:layout(R) =/= none],
-    case Misplaced ++ [{V, Reason} || {V, {error, Reason}} <- Selected] of
-        [] -> prepare(Router, Views, maps:from_list(Selected));
-        Errors -> {error, {invalid_templates, Errors}}
+    case Misplaced of
+        [] -> prepare(Router, Views, Selected);
+        _ -> {error, {invalid_templates, Misplaced}}
     end.
 
 prepare(Router, Views, Selected) ->
@@ -92,17 +89,5 @@ compile(View, File, Layouts, {ok, Name}) ->
         _ -> {error, {unknown_layout, Name}}
     end.
 
-%% The layout of a view: what its route options say and what its metadata says
-%% (the module is loaded and its metadata already checked to be a map). Either is
-%% enough; both must agree.
-selected(View, FromRoute) ->
-    {ok, Meta} = weberl_handler:metadata(View),
-    case {FromRoute, maps:find(layout, Meta)} of
-        {none, error} -> none;
-        {none, {ok, Name}} -> {ok, Name};
-        {{ok, Name}, error} -> {ok, Name};
-        {{ok, Name}, {ok, Name}} -> {ok, Name};
-        {{ok, A}, {ok, B}} -> {error, {conflicting_layout, A, B}}
-    end.
 
 norm(Path) -> filename:join(filename:split(Path)).

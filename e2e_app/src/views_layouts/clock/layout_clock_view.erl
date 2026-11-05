@@ -2,10 +2,9 @@
 -module(layout_clock_view).
 -behaviour(weberl_handler).
 -weberl_page(one_way).
+-weberl_route(#{layout => main}).
 
--export([handle/1, weberl_metadata/0]).
-
-weberl_metadata() -> #{layout => main}.
+-export([handle/1]).
 
 handle(Request) ->
     %% The page id identifies this page's live session. Hand it to whatever

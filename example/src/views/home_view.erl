@@ -1,11 +1,10 @@
 %% GET /  -- renders home_view.weberl (same directory, same base name).
 -module(home_view).
 -behaviour(weberl_handler).
-
--export([handle/1, weberl_metadata/0]).
-
 %% The page around the template: src/layouts/main.weberl
-weberl_metadata() -> #{layout => main}.
+-weberl_route(#{layout => main}).
+
+-export([handle/1]).
 
 handle(_Request) ->
     weberl_response:html(

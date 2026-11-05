@@ -1,7 +1,7 @@
 %% Feedback from agentic (item 5): "Layout is only selectable through weberl_metadata/0, not
 %% through the -weberl_route(...) attribute next to -weberl_page(...); one place would be
-%% more predictable." A view now selects its layout in its route options; the metadata form
-%% still works; both may be given when they agree.
+%% more predictable." A view selects its layout in its route options, and that is the only
+%% way (weberl_metadata/0 was removed: nothing else used it).
 -module(weberl_route_layout_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -16,8 +16,8 @@ ensure_records() ->
 
 bin(IoData) -> iolist_to_binary(IoData).
 
-%% A view with an optional -weberl_route attribute, an optional -weberl_page attribute and
-%% optional metadata.
+%% A view with the given attributes and, optionally, a leftover weberl_metadata/0 (which
+%% nothing reads any more).
 view_src(Module, Attrs, Meta) ->
     MetaFun = case Meta of
                   none -> "";
@@ -95,28 +95,18 @@ no_layout_is_standalone_test() ->
     ?assertEqual(<<"<p>T</p>">>, bin(weberl_template:render(V, #{t => <<"T">>}))).
 
 %% ---------------------------------------------------------------------
-%% The metadata form still works
+%% weberl_metadata/0 is gone
 
-metadata_still_selects_test() ->
+%% A view that still exports it is not an error, but it selects nothing: the page stays
+%% standalone, so a missed migration shows up as a missing layout, not as a crash.
+a_leftover_metadata_function_selects_nothing_test() ->
     {V, Table, ok} = run("m", "", "#{layout => main}"),
-    ?assertEqual(none, weberl_route:layout(route_of(V, Table))),     % the route declares none
-    ?assertEqual({ok, main}, weberl_template:layout(V)),               % but it was compiled with main
-    ?assertEqual(<<"<body><p>T</p></body>">>, bin(weberl_template:render(V, #{t => <<"T">>}))).
+    ?assertEqual(none, weberl_route:layout(route_of(V, Table))),
+    ?assertEqual({ok, none}, weberl_template:layout(V)),
+    ?assertEqual(<<"<p>T</p>">>, bin(weberl_template:render(V, #{t => <<"T">>}))).
 
-metadata_without_layout_key_is_fine_test() ->
-    {V, _, ok} = run("e", "-weberl_route(#{layout => main}).", "#{}"),
-    ?assertEqual({ok, main}, weberl_template:layout(V)).
-
-%% ---------------------------------------------------------------------
-%% Both given
-
-agreeing_declarations_are_fine_test() ->
-    {V, _, ok} = run("g", "-weberl_route(#{layout => main}).", "#{layout => main}"),
-    ?assertEqual({ok, main}, weberl_template:layout(V)).
-
-conflicting_declarations_are_an_error_test() ->
-    {V, _, Result} = run("c", "-weberl_route(#{layout => main}).", "#{layout => admin}"),
-    ?assertEqual({error, {invalid_templates, [{V, {conflicting_layout, main, admin}}]}}, Result).
+the_handler_module_has_no_metadata_api_test() ->
+    ?assertEqual(false, erlang:function_exported(weberl_handler, metadata, 1)).
 
 %% ---------------------------------------------------------------------
 %% Errors

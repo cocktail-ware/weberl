@@ -3,10 +3,9 @@
 -module(layout_regions_view).
 -behaviour(weberl_handler).
 -weberl_page(two_way).
+-weberl_route(#{layout => main}).
 
--export([handle/1, handle_request/3, weberl_metadata/0]).
-
-weberl_metadata() -> #{layout => main}.
+-export([handle/1, handle_request/3]).
 
 handle(Request) ->
     weberl_response:html(200, weberl_live:mount(?MODULE, Request, weberl_view_data:new(#{title => <<"Regions">>, n => 0}))).

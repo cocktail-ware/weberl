@@ -109,8 +109,7 @@ regions(View) ->
     end.
 
 %% @doc The layout the view's template was compiled with: `{ok, Name}', or
-%% `{ok, none}' for a standalone page. This is what was composed, whichever way the
-%% layout was selected (route option or metadata).
+%% `{ok, none}' for a standalone page (the layout of the view's route options).
 -spec layout(module()) -> {ok, atom()} | {error, {no_template, module()}}.
 layout(View) ->
     Mod = generated_module(View),

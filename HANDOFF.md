@@ -121,13 +121,16 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   template libraries).
 - **5 done (user: option A)**: `layout` is a route option (`-weberl_route(#{layout => main}).`,
   `check_opts` takes an atom); `weberl_route:layout/1` (`{ok, Name} | none`), `weberl_template:layout/1`
-  (what was compiled; the generated `info/0` has `layout`), `weberl_template_layout:name/1`. The metadata
-  form is still accepted; both given and different is `{conflicting_layout, Route, Meta}`; a declarative
+  (what was compiled; the generated `info/0` has `layout`), `weberl_template_layout:name/1`. A declarative
   route naming a layout is `layout_needs_a_filesystem_view`; the `none` sentinel problem is gone
-  (`{ok, Name} | none`). `weberl_metadata/0` has no other use: nothing reads it but the layout selection
-  and the `check/1` validation. Tests: `weberl_route_layout_tests` (752 eunit tests pass). User wants
-  **runtime-chosen layouts** later: design notes in `ROADMAP.md` "Layouts chosen at runtime". Left: the
-  deprecation of the metadata form is not decided (kept silently). **Next: 2 (conditionals), then 3.**
+  (`{ok, Name} | none`). **`weberl_metadata/0` was then removed** (user: nothing in the roadmap needs it;
+  reintroduce if ever needed): callback, `weberl_handler:metadata/1`, the `check/1` validation, the
+  `conflicting_layout` error, the example and e2e views (now `-weberl_route(#{layout => main}).`), tests and
+  docs (`MILESTONE_2.md` section 7 has an update note); a leftover `weberl_metadata/0` in a view is ignored.
+  Tests: `weberl_route_layout_tests` (747 eunit tests pass; the example app was started and its four pages
+  render through their layout). User wants **runtime-chosen layouts** later: design notes in `ROADMAP.md`
+  "Layouts chosen at runtime". **Next: 2 (conditionals, discuss first), then 3.** The e2e browser suite was
+  not re-run after the e2e_app views changed (only compiled).
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

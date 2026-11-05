@@ -102,7 +102,7 @@ src/
 │   ├── weberl_route.erl        route record, path normalization
 │   └── weberl_table.erl        assembly, precedence, lookup
 ├── handler/
-│   ├── weberl_handler.erl      behaviour, startup checks, metadata
+│   ├── weberl_handler.erl      behaviour, startup checks
 │   ├── weberl_request.erl      request record
 │   ├── weberl_response.erl     response record
 │   └── weberl_dispatch.erl     request -> response
@@ -580,7 +580,7 @@ for the next page survives `take`, in either order. A page that only calls `get`
 until something takes it. Put flash on pages that display it with `take`; `keep` gives the messages a fresh
 `flash_ttl`.
 
-### Dispatch, errors and metadata
+### Dispatch and errors
 
 `weberl_dispatch:dispatch(Request, Table)` returns a response and never raises:
 
@@ -590,13 +590,9 @@ until something takes it. Put flash on pages that display it with `take`; `keep`
   `500` `Internal Server Error`. The client sees no details; the cause is logged
   at error level with handler, method, path, class, reason and stacktrace.
 
-A handler may export `weberl_metadata/0` returning a map. Weberl attaches no
-meaning to it yet; it is the extension point for future per-module settings
-(middleware, authentication). The `layout` key is still read for compatibility, but
-a [layout](#layouts) is now selected in the route options (`-weberl_route(#{layout => main}).`).
-Read it with `weberl_handler:metadata/1`.
-`weberl_handler:check/1` (used at startup) rejects modules without `handle/1` and
-metadata that is not a map.
+Per-module settings (the page kind, the [CSRF](#csrf-protection) mode, the [layout](#layouts)) are
+route options: `-weberl_route(Opts).` in a filesystem view, the third element of a declarative route.
+`weberl_handler:check/1` (used at startup) rejects modules without `handle/1`.
 
 ## Templates
 
@@ -718,9 +714,7 @@ next to its page kind; a view without `layout` stays a standalone page:
 
 `weberl_route:layout(Route)` is `{ok, main}` or `none` (what the route declares);
 `weberl_template:layout(View)` is `{ok, main}` or `{ok, none}` (what the view was compiled with).
-The older form, `weberl_metadata() -> #{layout => main}`, is still accepted and gives the same
-result; give both only if they agree (`{conflicting_layout, RouteLayout, MetadataLayout}` fails
-the router's start otherwise). Only filesystem views have templates, so a declarative route that
+Only filesystem views have templates, so a declarative route that
 names a layout is an error (`layout_needs_a_filesystem_view`). The layout is chosen when the router
 starts, once per view: it cannot depend on the request (see "Layouts chosen at runtime" in
 `ROADMAP.md`).
@@ -739,7 +733,7 @@ router starts, like all templates.
 Errors at router start: `{invalid_layouts, [{Name, Reason}]}` with `{missing_content,
 File}`, `{multiple_content, File, Lines}` or a `syntax_error` (`{content_in_unsupported_context,
 Where}`); `{duplicate_layouts, [{Name, Files}]}`; and in `{invalid_templates, [{View,
-Reason}]}`: `{unknown_layout, Name}`, `layout_without_template` (the metadata asks for a
+Reason}]}`: `{unknown_layout, Name}`, `layout_without_template` (the route options ask for a
 layout but the view has no template), `content_outside_layout` (a view or a standalone
 template uses `{: content :}`) and `{duplicate_region, Name, LayoutFile, ViewFile}`.
 

@@ -228,19 +228,19 @@ layout_file_slot_errors_test_() ->
                    layout_error(<<"{: slot a :}<b{: /slot a :}{: content :}">>))].
 
 %% ---------------------------------------------------------------------
-%% selection by metadata, through a router
+%% selection by route options, through a router
 
 ensure_records() ->
     {module, weberl_config} = code:ensure_loaded(weberl_config),
     ok.
 
-view_src(Module, Meta) ->
+%% `Opts' is the map of the view's `-weberl_route(Opts).'
+view_src(Module, Opts) ->
     iolist_to_binary(
-      io_lib:format("-module(~s).~n-export([handle/1, weberl_metadata/0]).~n"
-                    "weberl_metadata() -> ~s.~n"
+      io_lib:format("-module(~s).~n-weberl_route(~s).~n-export([handle/1]).~n"
                     "handle(_) ->~n"
                     "    weberl_response:html(200, weberl_template:render(?MODULE, #{t => <<\"T\">>})).~n",
-                    [Module, Meta])).
+                    [Module, Opts])).
 
 compile_load(File) ->
     {ok, Mod, Bin} = compile:file(File, [binary, return_errors]),
@@ -256,19 +256,19 @@ prepare(Dir, Layouts) ->
 
 views_test_() ->
     {foreach, fun() -> ok end, fun(_) -> ok end,
-     [{"layout from metadata", fun metadata_layout/0},
+     [{"layout from the route options", fun route_layout/0},
       {"view without layout stays standalone", fun standalone/0},
       {"layout below the views root is not an unassociated template", fun layout_in_views/0},
       {"unknown layout", fun unknown_layout/0},
-      {"layout metadata without a template", fun no_template/0},
+      {"layout option without a template", fun no_template/0},
       {"duplicate layout names", fun duplicate_layouts/0},
       {"invalid layout", fun invalid_layout/0}]}.
 
-setup(Name, Meta, Tpl, Layouts) ->
+setup(Name, Opts, Tpl, Layouts) ->
     V = atom_to_list(weberl_test_handlers:unique(Name)) ++ "_view",
-    {V, [{"views/" ++ V ++ ".erl", view_src(V, Meta)}, {"views/" ++ V ++ ".weberl", Tpl} | Layouts]}.
+    {V, [{"views/" ++ V ++ ".erl", view_src(V, Opts)}, {"views/" ++ V ++ ".weberl", Tpl} | Layouts]}.
 
-metadata_layout() ->
+route_layout() ->
     with_tmp(fun(Dir) ->
         {V, Files} = setup("m", "#{layout => main}", <<"<p>{{ t }}</p>">>,
                            [{"layouts/main.weberl", <<"<body>{: content :}</body>">>}]),
@@ -315,8 +315,7 @@ no_template() ->
         V = atom_to_list(weberl_test_handlers:unique("n")) ++ "_view",
         write_tree(Dir, [{"views/" ++ V ++ ".erl",
                           iolist_to_binary(io_lib:format(
-                            "-module(~s).~n-export([handle/1, weberl_metadata/0]).~n"
-                            "weberl_metadata() -> #{layout => main}.~n"
+                            "-module(~s).~n-weberl_route(#{layout => main}).~n-export([handle/1]).~n"
                             "handle(_) -> weberl_response:html(200, <<\"x\">>).~n", [V]))},
                          {"layouts/main.weberl", <<"{: content :}">>}]),
         compile_load(filename:join(Dir, "views/" ++ V ++ ".erl")),

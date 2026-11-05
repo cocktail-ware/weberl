@@ -11,10 +11,9 @@
 -module(layout_counter_view).
 -behaviour(weberl_handler).
 -weberl_page(two_way).
+-weberl_route(#{layout => main}).
 
--export([handle/1, handle_request/3, weberl_metadata/0]).
-
-weberl_metadata() -> #{layout => main}.
+-export([handle/1, handle_request/3]).
 
 handle(Request) ->
     PageId = weberl_request:page(Request),

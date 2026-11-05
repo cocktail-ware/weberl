@@ -361,6 +361,11 @@ The implementation may use module attributes or an optional metadata callback, b
 
 Any metadata inspection must be deterministic and documented.
 
+> Update 2026-11-05: the optional `weberl_metadata/0` callback built for this section was removed once layout
+> selection moved to the route options: nothing read it. Per-module settings (page kind, CSRF mode, layout)
+> are route options, `-weberl_route(Opts).` in a view or the third element of a declarative route. If
+> metadata is ever needed again (middleware, authentication policies), it can be reintroduced.
+
 ---
 
 ## 8. Weberl template convention

@@ -4,19 +4,14 @@
 %% `weberl_request' and must return a `weberl_response'. Filesystem views and
 %% declarative handlers use the same contract.
 %%
-%% == Metadata extension point ==
-%% A handler may export `weberl_metadata/0' returning a map. Weberl reads it
-%% with {@link metadata/1} and attaches no meaning to it in Milestone 2; it
-%% exists so later milestones can add middleware, auth, layout and similar
-%% per-module settings without changing the handler contract. The callback is
-%% called each time {@link metadata/1} is invoked and must be pure and
-%% deterministic. Modules without it have the metadata `#{}'.
+%% Per-module settings (the page kind, CSRF mode, layout...) are route options:
+%% `-weberl_route(Opts).' in a filesystem view, the third element of a declarative
+%% route (see {@link weberl_route:check_opts/1}).
 -module(weberl_handler).
 
--export([check/1, metadata/1]).
+-export([check/1]).
 
 -callback handle(weberl_request:t()) -> weberl_response:t().
--callback weberl_metadata() -> map().
 %% Optional, for live (`one_way' / `two_way') pages: the page's client sent a
 %% request (`weberl.request(Name, Data)' in the beacon, or a POST to
 %% `/_weberl/request/:id'). `Data' is the decoded JSON value, `Page' the page
@@ -51,8 +46,7 @@
 %% continues without a snapshot.
 -callback handle_subscribe(Topic :: weberl_live:topic(), Page :: page_context()) ->
     {snapshot, Name :: binary(), Data :: iodata()} | ok.
--optional_callbacks([weberl_metadata/0, handle_request/3, weberl_topics/1,
-                     handle_subscribe/2]).
+-optional_callbacks([handle_request/3, weberl_topics/1, handle_subscribe/2]).
 %% What a callback is told about the page: its id, kind and topics, taken from
 %% the verified token. There is no user data in it: put what a callback needs
 %% to know into the topic names. The context of `handle_request/3' of a page
@@ -68,36 +62,15 @@
 -export_type([page_context/0]).
 
 %% @doc Check that a module can serve as a handler: it loads, exports
-%% `handle/1', and its optional metadata callback returns a map.
+%% `handle/1'.
 -spec check(module()) -> ok | {error, term()}.
 check(Module) when is_atom(Module) ->
     case code:ensure_loaded(Module) of
         {module, Module} ->
             case erlang:function_exported(Module, handle, 1) of
-                true ->
-                    case metadata(Module) of
-                        {ok, _} -> ok;
-                        {error, _} = Error -> Error
-                    end;
-                false ->
-                    {error, {invalid_handler, Module, missing_callback_handle_1}}
+                true -> ok;
+                false -> {error, {invalid_handler, Module, missing_callback_handle_1}}
             end;
         {error, Reason} ->
             {error, {invalid_handler, Module, {not_loadable, Reason}}}
-    end.
-
-%% @doc Metadata of a handler module (`#{}' when it has none).
--spec metadata(module()) -> {ok, map()} | {error, term()}.
-metadata(Module) ->
-    case erlang:function_exported(Module, weberl_metadata, 0) of
-        false ->
-            {ok, #{}};
-        true ->
-            try Module:weberl_metadata() of
-                M when is_map(M) -> {ok, M};
-                Other -> {error, {invalid_handler, Module, {invalid_metadata, Other}}}
-            catch
-                Class:Reason ->
-                    {error, {invalid_handler, Module, {metadata_failed, Class, Reason}}}
-            end
     end.
