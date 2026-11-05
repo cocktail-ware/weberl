@@ -4,16 +4,21 @@
 %%
 %% Layouts are the `.weberl' files below the router's `layouts' directories,
 %% named by their base name (`layouts/main.weberl' is `main'). A view selects
-%% one with its metadata, `weberl_metadata() -> #{layout => main}'; a view
-%% without `layout' is a standalone page. Layout files are not associated with
-%% views, so they may also live below a filesystem root.
+%% one in its route options, `-weberl_route(#{layout => main}).' (the metadata
+%% form, `weberl_metadata() -> #{layout => main}', is still accepted; both may be
+%% given when they agree); a view without a layout is a standalone page. Layouts
+%% are composed when the router starts, so the choice is per view, not per
+%% request. Layout files are not associated with views, so they may also live
+%% below a filesystem root.
 %%
 %% All templates are compiled before any is loaded, so a router either gets all
 %% its templates or none are replaced. Errors:
 %% `{unassociated_templates, Files}', `{duplicate_template_associations, _}',
 %% `{duplicate_layouts, [{Name, Files}]}', `{invalid_layouts, [{Name, Reason}]}',
-%% `{invalid_templates, [{View, Reason}]}' (Reason may be `{unknown_layout, Name}'
-%% or `layout_without_template').
+%% `{invalid_templates, [{View, Reason}]}' (Reason may be `{unknown_layout, Name}',
+%% `layout_without_template', `{conflicting_layout, RouteLayout, MetadataLayout}'
+%% or, for a declarative route that names a layout, `layout_needs_a_filesystem_view':
+%% only filesystem views have templates).
 -module(weberl_views).
 
 -export([prepare/2]).
@@ -21,8 +26,21 @@
 %% @doc `Router' is a validated `weberl_config' `router'; `Table' its table.
 -spec prepare(term(), weberl_table:t()) -> ok | {error, term()}.
 prepare(Router, Table) ->
-    Views = [{weberl_route:handler(R), weberl_route:source(R)}
-             || R <- weberl_table:routes(Table), weberl_route:origin(R) =:= filesystem],
+    Routes = weberl_table:routes(Table),
+    FsRoutes = [R || R <- Routes, weberl_route:origin(R) =:= filesystem],
+    Views = [{weberl_route:handler(R), weberl_route:source(R)} || R <- FsRoutes],
+    %% View => {ok, Layout} | none, or the reason it cannot be decided
+    Selected = [{weberl_route:handler(R), selected(weberl_route:handler(R), weberl_route:layout(R))}
+                || R <- FsRoutes],
+    Misplaced = [{weberl_route:handler(R), layout_needs_a_filesystem_view}
+                 || R <- Routes, weberl_route:origin(R) =/= filesystem,
+                    weberl_route:layout(R) =/= none],
+    case Misplaced ++ [{V, Reason} || {V, {error, Reason}} <- Selected] of
+        [] -> prepare(Router, Views, maps:from_list(Selected));
+        Errors -> {error, {invalid_templates, Errors}}
+    end.
+
+prepare(Router, Views, Selected) ->
     LayoutFiles = lists:sort(lists:append([weberl_template:discover(D)
                                            || D <- weberl_config:layouts(Router)])),
     Templates = [T || T <- lists:append([weberl_template:discover(weberl_config:root(F))
@@ -31,7 +49,7 @@ prepare(Router, Table) ->
     case weberl_template:associate(Templates, Views) of
         {ok, Pairs} ->
             case layouts(LayoutFiles) of
-                {ok, Layouts} -> compile_all(Pairs, Views, Layouts);
+                {ok, Layouts} -> compile_all(Pairs, Views, Layouts, Selected);
                 {error, _} = Error -> Error
             end;
         {error, _} = Error ->
@@ -53,11 +71,12 @@ layouts(Files) ->
             {error, {duplicate_layouts, Dups}}
     end.
 
-compile_all(Pairs, Views, Layouts) ->
+compile_all(Pairs, Views, Layouts, Selected) ->
     Templated = [View || {View, _} <- Pairs],
     Orphans = [{View, layout_without_template} || {View, _} <- Views,
-                   not lists:member(View, Templated), layout_of(View) =/= none],
-    Results = [{View, compile(View, File, Layouts)} || {View, File} <- Pairs],
+                   not lists:member(View, Templated), maps:get(View, Selected) =/= none],
+    Results = [{View, compile(View, File, Layouts, maps:get(View, Selected))}
+               || {View, File} <- Pairs],
     case Orphans ++ [{View, Reason} || {View, {error, Reason}} <- Results] of
         [] ->
             lists:foreach(fun({_, {ok, Compiled}}) -> weberl_template:load(Compiled) end, Results);
@@ -65,20 +84,25 @@ compile_all(Pairs, Views, Layouts) ->
             {error, {invalid_templates, Errors}}
     end.
 
-compile(View, File, Layouts) ->
-    case layout_of(View) of
-        none ->
-            weberl_template:compile_file(View, File);
-        Name ->
-            case Layouts of
-                #{Name := Layout} -> weberl_template:compile_file(View, File, Layout);
-                _ -> {error, {unknown_layout, Name}}
-            end
+compile(View, File, _Layouts, none) ->
+    weberl_template:compile_file(View, File);
+compile(View, File, Layouts, {ok, Name}) ->
+    case Layouts of
+        #{Name := Layout} -> weberl_template:compile_file(View, File, Layout);
+        _ -> {error, {unknown_layout, Name}}
     end.
 
-%% The layout a view's metadata asks for (already checked to be a map).
-layout_of(View) ->
+%% The layout of a view: what its route options say and what its metadata says
+%% (the module is loaded and its metadata already checked to be a map). Either is
+%% enough; both must agree.
+selected(View, FromRoute) ->
     {ok, Meta} = weberl_handler:metadata(View),
-    maps:get(layout, Meta, none).
+    case {FromRoute, maps:find(layout, Meta)} of
+        {none, error} -> none;
+        {none, {ok, Name}} -> {ok, Name};
+        {{ok, Name}, error} -> {ok, Name};
+        {{ok, Name}, {ok, Name}} -> {ok, Name};
+        {{ok, A}, {ok, B}} -> {error, {conflicting_layout, A, B}}
+    end.
 
 norm(Path) -> filename:join(filename:split(Path)).

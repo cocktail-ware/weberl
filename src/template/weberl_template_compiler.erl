@@ -6,7 +6,7 @@
 %% file, so stack traces point at the template.
 -module(weberl_template_compiler).
 
--export([generated_module/1, compile/3]).
+-export([generated_module/1, compile/3, compile/4]).
 
 %% The element around a region: the `weberl-region' web component, or the
 %% element the template asked for, marked with `data-weberl-region'. The browser
@@ -26,8 +26,15 @@ generated_module(View) ->
 -spec compile(module(), weberl_template_parser:ast(), file:filename_all()) ->
     {ok, module(), binary()} | {error, term()}.
 compile(View, Ast, File) ->
+    compile(View, Ast, File, none).
+
+%% @doc Like {@link compile/3}; `Layout' (the name of the layout the AST was
+%% composed with, or `none') is recorded in `info/0'.
+-spec compile(module(), weberl_template_parser:ast(), file:filename_all(), atom()) ->
+    {ok, module(), binary()} | {error, term()}.
+compile(View, Ast, File, Layout) ->
     Mod = generated_module(View),
-    Forms = forms(Mod, View, Ast, File),
+    Forms = forms(Mod, View, Ast, File, Layout),
     case compile:forms(Forms, [return_errors, binary]) of
         {ok, Mod, Bin} -> {ok, Mod, Bin};
         {error, Errors, _Warnings} -> {error, {compile_failed, Errors}}
@@ -36,11 +43,11 @@ compile(View, Ast, File) ->
 %% `render/1' renders the whole template. `render_region/2' renders the content
 %% of one region (what goes inside its wrapper element) for the browser to swap
 %% in; `info/0' lists the regions with their variables.
-forms(Mod, View, Ast, File) ->
+forms(Mod, View, Ast, File, Layout) ->
     Regions = weberl_template_parser:regions(Ast),
     Info = #{view => View, file => unicode:characters_to_binary(File),
              variables => weberl_template_parser:variables(Ast),
-             regions => Regions},
+             regions => Regions, layout => Layout},
     RegionClauses = [{clause, Line, [{atom, Line, Name}, {var, Line, 'Assigns'}], [],
                       [body(Children, View)]}
                      || {Name, Line, Children} <- region_nodes(Ast)],

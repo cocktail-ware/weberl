@@ -4,7 +4,7 @@
 %% filesystem and declarative routes.
 -module(weberl_route).
 
--export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1, csrf/1,
+-export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1, csrf/1, layout/1,
          normalize_path/1, check_opts/1, check_live/1]).
 -export_type([t/0, origin/0, path/0, live/0, opts/0]).
 -export_record([route]).
@@ -17,7 +17,8 @@
 %% `live': the page kind. `session': `false' makes a live page session-less
 %% (no process per page; it only receives the topics of its handler, see
 %% `weberl_live'); default `true'.
--type opts() :: #{live => live(), session => boolean(), csrf => true | origin | false}.
+-type opts() :: #{live => live(), session => boolean(), csrf => true | origin | false,
+                  layout => atom()}.
 
 -record #route{
     path    :: path(),
@@ -66,22 +67,33 @@ live(#route{opts = O}) -> maps:get(live, O, normal).
 -spec session(t()) -> boolean().
 session(#route{opts = O}) -> maps:get(session, O, true).
 
+%% @doc The layout the route declares (`layout => Name' in its options, i.e.
+%% `-weberl_route(#{layout => main}).' in a view), `none' when it declares none. Only
+%% filesystem views have templates, so only they may declare one; see
+%% {@link weberl_views}. The layout a view was compiled with, whichever way it was
+%% selected, is `weberl_template:layout/1'.
+-spec layout(t()) -> {ok, atom()} | none.
+layout(#route{opts = O}) ->
+    case maps:find(layout, O) of
+        {ok, Name} -> {ok, Name};
+        error -> none
+    end.
+
 %% @doc The CSRF mode of the route, `true' unless declared otherwise (see
 %% {@link weberl_csrf}).
 -spec csrf(t()) -> weberl_csrf:mode().
 csrf(#route{opts = O}) -> maps:get(csrf, O, true).
 
-%% @doc Validate a route options map. The keys are `live', `session' and `csrf'; a
-%% session-less page has to be live.
+%% @doc Validate a route options map. The keys are `live', `session', `csrf' and
+%% `layout' (an atom); a session-less page has to be live.
 -spec check_opts(term()) -> {ok, opts()} | {error, term()}.
 check_opts(Opts) when is_map(Opts) ->
-    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf] of
+    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf, K =/= layout] of
         [] ->
-            case {check_kind(Opts), check_session(Opts), check_csrf(Opts)} of
-                {ok, ok, ok} -> {ok, Opts};
-                {{error, _} = Error, _, _} -> Error;
-                {ok, {error, _} = Error, _} -> Error;
-                {ok, ok, {error, _} = Error} -> Error
+            Checks = [check_kind(Opts), check_session(Opts), check_csrf(Opts), check_layout(Opts)],
+            case [E || {error, _} = E <- Checks] of
+                [] -> {ok, Opts};
+                [Error | _] -> Error
             end;
         Unknown ->
             {error, {unknown_options, lists:sort(Unknown)}}
@@ -93,6 +105,13 @@ check_kind(Opts) ->
     case maps:find(live, Opts) of
         error -> ok;
         {ok, Kind} -> check_live(Kind)
+    end.
+
+check_layout(Opts) ->
+    case maps:find(layout, Opts) of
+        error -> ok;
+        {ok, Name} when is_atom(Name) -> ok;
+        {ok, Other} -> {error, {invalid_layout, Other}}
     end.
 
 check_csrf(Opts) ->

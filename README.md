@@ -592,7 +592,9 @@ until something takes it. Put flash on pages that display it with `take`; `keep`
 
 A handler may export `weberl_metadata/0` returning a map. Weberl attaches no
 meaning to it yet; it is the extension point for future per-module settings
-(middleware, authentication). `layout` selects a [layout](#layouts). Read it with `weberl_handler:metadata/1`.
+(middleware, authentication). The `layout` key is still read for compatibility, but
+a [layout](#layouts) is now selected in the route options (`-weberl_route(#{layout => main}).`).
+Read it with `weberl_handler:metadata/1`.
 `weberl_handler:check/1` (used at startup) rejects modules without `handle/1` and
 metadata that is not a map.
 
@@ -704,14 +706,24 @@ A layout is a template with one `{: content :}` where a view's template goes, so
 </html>
 ```
 
-The router lists the directories with layouts, and a view picks one in its metadata
-(`weberl_metadata/0`); a view without `layout` stays a standalone page:
+The router lists the directories with layouts, and a view picks one in its route options,
+next to its page kind; a view without `layout` stays a standalone page:
 
 ```erlang
 #router{filesystem = [...], layouts = ["src/layouts"]}
 
-weberl_metadata() -> #{layout => main}.      %% src/layouts/main.weberl
+-weberl_page(one_way).                       %% in the view's .erl: how it is served ...
+-weberl_route(#{layout => main}).            %% ... and what it looks like: src/layouts/main.weberl
 ```
+
+`weberl_route:layout(Route)` is `{ok, main}` or `none` (what the route declares);
+`weberl_template:layout(View)` is `{ok, main}` or `{ok, none}` (what the view was compiled with).
+The older form, `weberl_metadata() -> #{layout => main}`, is still accepted and gives the same
+result; give both only if they agree (`{conflicting_layout, RouteLayout, MetadataLayout}` fails
+the router's start otherwise). Only filesystem views have templates, so a declarative route that
+names a layout is an error (`layout_needs_a_filesystem_view`). The layout is chosen when the router
+starts, once per view: it cannot depend on the request (see "Layouts chosen at runtime" in
+`ROADMAP.md`).
 
 A layout is named by its file's base name (names must be unique across the directories).
 Layout files are never associated with views, so they may also sit below a filesystem root.

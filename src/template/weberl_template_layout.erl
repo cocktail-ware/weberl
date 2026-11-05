@@ -28,10 +28,15 @@
 %% per template, and the layout and the view share one).
 -module(weberl_template_layout).
 
--export([parse/1, compose/3]).
+-export([parse/1, compose/3, name/1]).
 -export_type([layout/0]).
 
 -opaque layout() :: {file:filename_all(), weberl_template_parser:ast()}.
+
+%% @doc The layout's name: its file's base name (`layouts/main.weberl' is `main').
+-spec name(layout()) -> atom().
+name({File, _Ast}) ->
+    list_to_atom(filename:basename(unicode:characters_to_list(File), ".weberl")).
 
 %% @doc Read, parse and validate a layout file.
 -spec parse(file:filename_all()) -> {ok, layout()} | {error, term()}.

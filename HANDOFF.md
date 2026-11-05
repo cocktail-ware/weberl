@@ -119,6 +119,15 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   16 tests, incl. a 3-hop HTTP chain with a pass-through redirect). **Next: 5, then 2, then 3** (user's
   order; 5 and 2 are discussions, 2 and 3 need design decisions meant to generalise to other
   template libraries).
+- **5 done (user: option A)**: `layout` is a route option (`-weberl_route(#{layout => main}).`,
+  `check_opts` takes an atom); `weberl_route:layout/1` (`{ok, Name} | none`), `weberl_template:layout/1`
+  (what was compiled; the generated `info/0` has `layout`), `weberl_template_layout:name/1`. The metadata
+  form is still accepted; both given and different is `{conflicting_layout, Route, Meta}`; a declarative
+  route naming a layout is `layout_needs_a_filesystem_view`; the `none` sentinel problem is gone
+  (`{ok, Name} | none`). `weberl_metadata/0` has no other use: nothing reads it but the layout selection
+  and the `check/1` validation. Tests: `weberl_route_layout_tests` (752 eunit tests pass). User wants
+  **runtime-chosen layouts** later: design notes in `ROADMAP.md` "Layouts chosen at runtime". Left: the
+  deprecation of the metadata form is not decided (kept silently). **Next: 2 (conditionals), then 3.**
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

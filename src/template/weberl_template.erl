@@ -46,7 +46,7 @@
 -module(weberl_template).
 
 -export([render/2, try_render/2, render_region/3, try_render_region/3, regions/1,
-         has_template/1, generated_module/1,
+         has_template/1, generated_module/1, layout/1,
          compile_source/3, compile_source/4, compile_file/2, compile_file/3, parse_layout/1, load/1, compile_and_load_file/2,
          discover/1, associate/2]).
 -export_type([compiled/0, layout/0]).
@@ -108,6 +108,17 @@ regions(View) ->
         {error, _} -> {error, {no_template, View}}
     end.
 
+%% @doc The layout the view's template was compiled with: `{ok, Name}', or
+%% `{ok, none}' for a standalone page. This is what was composed, whichever way the
+%% layout was selected (route option or metadata).
+-spec layout(module()) -> {ok, atom()} | {error, {no_template, module()}}.
+layout(View) ->
+    Mod = generated_module(View),
+    case code:ensure_loaded(Mod) of
+        {module, Mod} -> {ok, maps:get(layout, Mod:info())};
+        {error, _} -> {error, {no_template, View}}
+    end.
+
 %% @doc Is a compiled template loaded (or loadable) for this view?
 -spec has_template(module()) -> boolean().
 has_template(View) ->
@@ -157,7 +168,7 @@ validate_and_compile(View, Ast, File, Layout) ->
         ok ->
             case layout(Layout, Ast, File) of
                 {ok, Full} ->
-                    case weberl_template_compiler:compile(View, Full, File) of
+                    case weberl_template_compiler:compile(View, Full, File, layout_name(Layout)) of
                         {ok, Mod, Bin} -> {ok, {Mod, Bin, File}};
                         {error, _} = Error -> Error
                     end;
@@ -167,6 +178,9 @@ validate_and_compile(View, Ast, File, Layout) ->
         {error, _} = Error ->
             Error
     end.
+
+layout_name(none) -> none;
+layout_name(Layout) -> weberl_template_layout:name(Layout).
 
 layout(none, Ast, File) ->
     case [{L, N} || {fill, L, N, _} <- Ast] of
