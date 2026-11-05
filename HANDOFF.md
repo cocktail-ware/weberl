@@ -131,6 +131,21 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   render through their layout). User wants **runtime-chosen layouts** later: design notes in `ROADMAP.md`
   "Layouts chosen at runtime". **Next: 2 (conditionals, discuss first), then 3.** The e2e browser suite was
   not re-run after the e2e_app views changed (only compiled).
+- **2 (template conditionals and loops), design in progress, one point at a time.** **Decision 1 (user,
+  2026-11-05): option C, Erlang expressions and patterns inside block tags.** Assigns are written `@name`
+  in expressions (`{{ name }}` stays as shorthand for `{{ @name }}`; names in `{{ }}` must start lowercase
+  today, so `{{ Name }}` is free for pattern-bound loop variables); locals are ordinary Erlang variables;
+  the two namespaces cannot clash. Region dependency tracking collects the `@` names. Implementation
+  sketch: pre-scan the expression text turning `@name` into a reserved variable (skipping strings, quoted
+  atoms, char literals), `erl_scan`/`erl_parse:parse_exprs`, then replace those variables with a runtime
+  assign lookup (`missing_variable` as elsewhere). Templates are developer code (like `.erl`), user input is
+  rendered, never evaluated. Open points still to decide in order: 2 truthiness (recommended strict
+  booleans, optional values passed as `undefined`, `case` for optional messages), 3 the forms
+  (`if`/`else`, `case`/`of`, `for`/`empty`), 4 where they may stand (HTML text only; no `content`/slot/fill
+  inside; attribute-level conditions a separate design), 5 regions inside `if`/`for` (region in `for`
+  forbidden until dynamic region names exist), 6 compilation (`case`, list comprehensions to iodata, loop
+  variables excluded from region dependencies), 7 the documented boundary for reuse by other template
+  libraries. Item 3 (safe URLs) follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`
