@@ -1,0 +1,4 @@
+    <h1>Regions</h1>
+    {: region form :}<input id="q" value="{{ n }}"> <span id="n">{{ n }}</span>{: /region form :}
+    <table id="t">{: region rows tag=tbody :}<tr><td>{{ n }}</td></tr>{: /region rows :}</table>
+    {: region extra :}<em>{{ n }}</em>{: /region extra :}

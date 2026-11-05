@@ -13,6 +13,9 @@
 #   test/e2e/run.sh unit                  only the unit tests (no app, no pod services)
 #   test/e2e/run.sh e2e -g "counter"      browser tests whose title matches
 #   E2E_BROWSERS=chromium,firefox,webkit test/e2e/run.sh e2e    all three browsers
+#   E2E_VARIANTS=plain test/e2e/run.sh e2e    only one variant of the app (plain, layouts)
+# The browser specs run once per variant of the app under test: plain templates and
+# the same pages as views of a layout (E2E_VARIANTS, default "plain layouts").
 # The browser tests are heavy for the machine: they run in Chromium only unless
 # E2E_BROWSERS says otherwise, and the containers have CPU and memory limits.
 #
@@ -47,6 +50,7 @@ node_run() {
   podman run --rm --pod "$POD" --init --ipc=host \
     --cpus "${E2E_CPUS:-2}" --memory "${E2E_MEMORY:-3g}" \
     -e E2E_BROWSERS="${E2E_BROWSERS:-chromium}" \
+    -e E2E_VARIANT="${VARIANT:-plain}" \
     -v "$ROOT/test/node:/work:Z" -w /work "$E2E_IMAGE" "$@"
 }
 
@@ -61,30 +65,35 @@ if [ "$MODE" = "e2e" ] || [ "$MODE" = "all" ]; then
   echo "== fake CA and certificates"
   node_run bash gen-certs.sh
 
-  echo "== starting the app under test"
-  podman run -d --pod "$POD" --name "$POD-app" \
-    --cpus "${APP_CPUS:-1}" --memory "${APP_MEMORY:-1g}" \
-    -v "$ROOT:/app:Z" -w /app/e2e_app \
-    -e E2E_PORT="$PORT" \
-    -e E2E_CERT=/app/test/node/certs/server.pem -e E2E_KEY=/app/test/node/certs/server.key \
-    "$APP_IMAGE" bash start.sh >/dev/null
+  # The same specs run against each variant of the app (see e2e_app_sup.erl):
+  # plain templates, and the same pages as views of a layout.
+  for VARIANT in ${E2E_VARIANTS:-plain layouts}; do
+    echo "== starting the app under test ($VARIANT)"
+    podman rm -f "$POD-app" >/dev/null 2>&1 || true
+    podman run -d --pod "$POD" --name "$POD-app" \
+      --cpus "${APP_CPUS:-1}" --memory "${APP_MEMORY:-1g}" \
+      -v "$ROOT:/app:Z" -w /app/e2e_app \
+      -e E2E_PORT="$PORT" -e E2E_VARIANT="$VARIANT" \
+      -e E2E_CERT=/app/test/node/certs/server.pem -e E2E_KEY=/app/test/node/certs/server.key \
+      "$APP_IMAGE" bash start.sh >/dev/null
 
-  ready=0
-  for _ in $(seq 1 180); do
-    if podman exec "$POD-app" curl -skf "https://app.test:$PORT/health" >/dev/null 2>&1; then
-      ready=1
-      break
+    ready=0
+    for _ in $(seq 1 180); do
+      if podman exec "$POD-app" curl -skf "https://app.test:$PORT/health" >/dev/null 2>&1; then
+        ready=1
+        break
+      fi
+      sleep 1
+    done
+    if [ "$ready" != 1 ]; then
+      echo "the app under test did not start; its log:" >&2
+      podman logs "$POD-app" >&2 || true
+      exit 1
     fi
-    sleep 1
-  done
-  if [ "$ready" != 1 ]; then
-    echo "the app under test did not start; its log:" >&2
-    podman logs "$POD-app" >&2 || true
-    exit 1
-  fi
 
-  echo "== browser tests"
-  node_run bash run-e2e.sh "$@" || status=$?
+    echo "== browser tests ($VARIANT)"
+    node_run bash run-e2e.sh "$@" || status=$?
+  done
 fi
 
 exit "$status"

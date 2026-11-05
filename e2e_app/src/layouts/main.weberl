@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{{ title }}</title>
+    {: slot head :}{: /slot head :}
+</head>
+<body>
+{: content :}
+</body>
+</html>

@@ -7,12 +7,28 @@
 
 start_link() -> supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% The same pages (same URLs, same behaviour) in two builds, so the browser specs
+%% run unchanged against both (E2E_VARIANT, set by test/e2e/run.sh):
+%%   plain    every page is a full HTML template (views_plain)
+%%   layouts  the same pages as views of a layout, with their scripts in its
+%%            head slot (views_layouts, layouts/main.weberl)
+%% views_common are the pages without a template, the same in both.
+router("plain", Src) ->
+    #router{filesystem = roots(Src, ["views_common", "views_plain"]),
+            modules = [e2e_app_router]};
+router("layouts", Src) ->
+    #router{filesystem = roots(Src, ["views_common", "views_layouts"]),
+            modules = [e2e_app_router],
+            layouts = [filename:join(Src, "layouts")]};
+router(Other, _Src) ->
+    error({unknown_e2e_variant, Other}).
+
+roots(Src, Dirs) ->
+    [#filesystem_router{root = filename:join(Src, D), prefix = "/"} || D <- Dirs].
+
 init([]) ->
-    ViewsRoot = filename:join(code:lib_dir(e2e_app), "src/views"),
-    Router = #router{
-        filesystem = [#filesystem_router{root = ViewsRoot, prefix = "/"}],
-        modules = [e2e_app_router]
-    },
+    Src = filename:join(code:lib_dir(e2e_app), "src"),
+    Router = router(os:getenv("E2E_VARIANT", "plain"), Src),
     Port = list_to_integer(os:getenv("E2E_PORT", "8443")),
     Listener = #listener{
         adapter = weberl_roadrunner,

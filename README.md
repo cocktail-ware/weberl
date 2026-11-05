@@ -1125,12 +1125,23 @@ test/e2e/run.sh                                     # unit tests and browser tes
 test/e2e/run.sh unit                                # only the unit tests (cheap)
 test/e2e/run.sh e2e -g counter                      # arguments after the mode go to Playwright
 E2E_BROWSERS=chromium,firefox,webkit test/e2e/run.sh e2e    # all three browsers
+E2E_VARIANTS=plain test/e2e/run.sh e2e                  # only one variant of the app (see below)
 ```
 
 The browser tests are heavy for the machine. They run in Chromium only unless `E2E_BROWSERS`
 lists more, and the containers have CPU and memory limits (`E2E_CPUS`/`E2E_MEMORY` for the
 browser, default 2 and 3g; `APP_CPUS`/`APP_MEMORY` for the app, 1 and 1g). Use the unit tests
 and `rebar3 eunit` for everyday checks.
+
+The app under test comes in two variants, and `run.sh` runs the specs once against each (twice
+the time; `E2E_VARIANTS=plain` or `=layouts` runs one). `plain` serves the pages that have a
+template (`clock`, `counter`, `regions`) as full HTML templates (`e2e_app/src/views_plain`);
+`layouts` serves the same pages, same URLs and same behaviour, as views of a
+[layout](#layouts) (`views_layouts`, `layouts/main.weberl`), with their scripts in its `head`
+slot. Pages without a template (`views_common`) are the same in both. So every spec doubles as
+a test of layouts, and `layouts.spec.js`, which only runs against `layouts`, checks the pages
+are really built from the layout. `E2E_VARIANT` (set by `run.sh`) chooses the variant in
+`e2e_app_sup.erl`.
 
 `run.sh` creates a throwaway podman pod. Its two containers (the Erlang image running the app
 under test, and the Playwright image running the tests with only `test/node/` mounted) share
