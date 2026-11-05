@@ -182,8 +182,25 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   (conditions, guards, qualifiers, funs) plus `{{ name }}`, never locals; a scope pass finds free locals in a
   region and rebinding; any function may be called in expressions (developer code; keep them pure and cheap,
   they run on every render and region re-render); `compose`/`walk`/region search recurse into blocks;
-  generated forms compile with warnings off. **Still to decide**: 7 the documented boundary for reuse by
-  other template libraries. Item 3 (safe URLs) follows and depends on this.
+  generated forms compile with warnings off. **Decision 7 (user): accepted**, reuse boundary: the block
+  machinery is modules in Weberl's source tree under `src/template/blocks/` (prefix `weberl_blocks_`) that call
+  nothing else in Weberl, only OTP: expression front end (text -> Erlang abstract forms, `@name` rewriting, line
+  offsets), scope analysis (free/bound locals, rebinding), dependency collection, block code generation; host
+  hooks for assign access, local renaming and value rendering. The generator produces abstract forms, so a
+  consumer may compile them into a module (Weberl) or run them with `erl_eval` (csserl, a one-shot CSS
+  preprocess). HTML walker, regions/slots/fills/content, layouts, escaping and live updates stay Weberl-specific.
+  `TEMPLATE_BLOCKS.md` documents the language, AST, errors and hooks. Extract into its own application when
+  csserl becomes the second consumer (a dependency of Weberl on csserl would make a cycle otherwise); CSSEx's
+  tests (`~/code/csserl` is a skeleton; the original is github mnussbaumer/cssex, eex_test.exs etc.) are
+  acceptance cases for that port. **Decision 8 (user): accepted**, expression interpolation: `{{ Expr }}` /
+  `{{{ Expr }}}` is any Erlang expression rendered through the host's value rules; a bare lowercase name stays
+  the assign shorthand, a bare capitalized name is a local; the tag ends at the first `}}` (`}}}` for raw), so an
+  expression containing `}}` (nested maps) needs a space (`} }`); dependencies are its `@names`; the HTML
+  context rules apply as for names; an unsupported result is `{unsupported_value, View, Source, Value}`
+  (Source: the name atom, or the expression text for expressions). **Build stages**: 1 expression module,
+  2 lexer, 3 parser and validation (AST, branch/context rules, scope pass, region rules), 4 layout composition
+  through blocks, 5 compiler and runtime, 6 README, `TEMPLATE_BLOCKS.md`, agentic feedback. Item 3 (safe URLs)
+  follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`

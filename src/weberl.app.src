@@ -5,7 +5,7 @@
     {mod, {weberl_app, []}},
     %% roadrunner is only needed by the weberl_roadrunner adapter. It is
     %% listed so that, when present, it starts first; weberl starts without it.
-    {applications, [kernel, stdlib, crypto, roadrunner]},
+    {applications, [kernel, stdlib, crypto, compiler, syntax_tools, roadrunner]},
     {optional_applications, [roadrunner]},
     {env, []},
     {modules, []}
