@@ -160,10 +160,30 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   inside `if`/`case` branches (content still at most once) but not inside `for`; `{: fill :}` stays top-level
   in a view; compile-time composition must find them at any depth of `if`/`case`; whitespace is literal
   (nothing trimmed); conditions inside tags and attributes are NOT in v1 (extension recorded in
-  `ROADMAP.md`). **Still to decide, in order**: 5 regions inside `if`/`case`/`for` (recommended: allowed
-  in branches; forbidden in `for` until dynamic region names exist), 6 compilation (`case`, list
-  comprehensions to iodata, loop variables excluded from region dependencies), 7 the documented boundary
-  for reuse by other template libraries. Item 3 (safe URLs) follows and depends on this.
+  `ROADMAP.md`). **Decision 5 (user): accepted.** Regions may stand in `if`/`case` branches
+  (`render_region/3` renders the content without the surrounding condition; a hidden branch simply has no
+  element and the browser ignores the patch); a region may contain blocks (their variables are the region's
+  dependencies); to make a conditional live put the block inside a region (document this: an `if`
+  outside any region is rendered once); a region may not use a local variable bound outside it
+  (`{region_uses_outer_variable, Region, Var, Line}`: it renders alone, from the assigns); no region in the
+  body of a `for` (`{region_in_for, Region, Line}`; allowed in `empty`; dynamic region names would lift it);
+  region names stay unique even across exclusive branches; `regions/1` marks nothing as conditional.
+  **Decision 6 (user): accepted, compilation.** New AST nodes `{'if', Line, [{Cond, Children}], Else}`,
+  `{'case', Line, Expr, [{Pattern, Guard, Children}]}`, `{for, Line, Qualifiers, Body, Empty}`,
+  `{local, Line, Name, Mode}`; expression text parsed once with `erl_scan`/`erl_parse` at the tag's line
+  offset (error `{syntax_error, File, Line, {invalid_expression, Text, Info}}`); `if` is nested
+  `case Cond of true/false/V -> error({template_error, {not_boolean, View, Line, V}})`; `case` is a native
+  `case` plus a last clause raising `{template_error, {case_clause, View, Line, V}}`; `for` is
+  `[Body || Quals]`, with `empty`: `case [Body || Quals] of [] -> Empty; L -> L end` (a non-matching
+  generator pattern skips the element, Erlang's rule); `@name` is
+  `weberl_template_runtime:assign(name, Assigns, View)` (raw term, `missing_variable` when absent); locals
+  are renamed with a reserved prefix (`Name` -> `W_Name`); `{{ Name }}` calls a runtime function taking a
+  value with the same type rules (`unsupported_value`); `variables/1`/`regions/1` collect every `@name`
+  (conditions, guards, qualifiers, funs) plus `{{ name }}`, never locals; a scope pass finds free locals in a
+  region and rebinding; any function may be called in expressions (developer code; keep them pure and cheap,
+  they run on every render and region re-render); `compose`/`walk`/region search recurse into blocks;
+  generated forms compile with warnings off. **Still to decide**: 7 the documented boundary for reuse by
+  other template libraries. Item 3 (safe URLs) follows and depends on this.
 - Arizona checked (clone of `arizona-framework/arizona`, read 2026-11-05): its CSRF is an
   `Origin` check (same-origin or allowlist `csrf_origins`; a missing Origin passes), a default
   middleware on live and controller routes, no tokens; cookies are `arizona_req:cookies/1`
