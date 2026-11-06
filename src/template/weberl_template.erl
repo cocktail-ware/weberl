@@ -54,31 +54,74 @@
 %% `{error, Reason}' instead.
 -module(weberl_template).
 
--export([render/2, try_render/2, render_region/3, try_render_region/3, regions/1,
-         has_template/1, generated_module/1, layout/1,
+-export([render/2, render/3, try_render/2, try_render/3, render_region/3, render_region/4,
+         try_render_region/3, try_render_region/4, regions/1, regions/2,
+         has_template/1, generated_module/1, layout/1, layouts/1,
          compile_source/3, compile_source/4, compile_source/5, compile_file/2, compile_file/3, compile_file/4,
          parse_layout/1, load/1, compile_and_load_file/2, warnings/1,
          discover/1, associate/2]).
--export_type([compiled/0, layout/0, compile_opts/0]).
+-export_type([compiled/0, layout/0, compile_opts/0, render_opts/0]).
+
+%% `layout': the layout to render with (a name from `layouts/1', `none' for the bare view).
+-type render_opts() :: #{layout => atom()}.
 
 -opaque compiled() :: {module(), binary(), file:filename_all(), [weberl_template_urls:warning()]}.
 -type layout() :: weberl_template_layout:layout().
 %% `routes': the route table links are checked against at compile time (without it the
 %% checks that need the table are skipped, and the render-time check still runs).
--type compile_opts() :: #{routes => weberl_table:t()}.
+%% `variant': compile the pair of the view and the layout it is composed with into that pair's
+%% own module (default: the view's default module); `layouts': the layouts the view may be
+%% rendered with, recorded for `render/3' (default: only the layout given).
+-type compile_opts() :: #{routes => weberl_table:t(), variant => atom(), layouts => [atom()]}.
 
 %% ---------------------------------------------------------------------------
 %% Rendering
 
 -spec render(module(), map()) -> iodata().
-render(View, Assigns) when is_atom(View), is_map(Assigns) ->
-    Mod = generated_module(View),
-    case code:ensure_loaded(Mod) of
-        {module, Mod} -> Mod:render(Assigns);
-        {error, _} -> erlang:error({template_error, {no_template, View}})
-    end;
 render(View, Assigns) ->
+    render(View, Assigns, #{}).
+
+%% @doc Render with the layout in `Opts' (`#{layout => Name}', `none' for the bare view) instead
+%% of the view's default. The layout has to be one the view's route allows (`layout' and
+%% `layouts' route options; see {@link layouts/1}), otherwise this raises
+%% `error({template_error, {unknown_layout, View, Name}})'. The name is the caller's decision,
+%% never read from the request by Weberl.
+-spec render(module(), map(), render_opts()) -> iodata().
+render(View, Assigns, Opts) when is_atom(View), is_map(Assigns), is_map(Opts) ->
+    (variant(View, Opts)):render(Assigns);
+render(View, Assigns, _Opts) when not is_map(Assigns) ->
     erlang:error({template_error, {invalid_assigns, View, Assigns}}).
+
+%% The generated module that renders `View' with the layout of `Opts': the default pair's when
+%% none is named; the allowed set is the default module's own record of it.
+variant(View, Opts) ->
+    Default = generated_module(View),
+    case code:ensure_loaded(Default) of
+        {module, Default} ->
+            case maps:find(layout, Opts) of
+                error -> Default;
+                {ok, Name} -> variant(View, Default, Name)
+            end;
+        {error, _} ->
+            erlang:error({template_error, {no_template, View}})
+    end.
+
+variant(View, Default, Name) ->
+    Info = Default:info(),
+    case maps:get(layout, Info) of
+        Name ->
+            Default;
+        _ ->
+            Allowed = lists:member(Name, maps:get(layouts, Info)),
+            Mod = case Allowed of
+                      true -> weberl_template_compiler:generated_module(View, Name);
+                      false -> undefined
+                  end,
+            case Allowed andalso code:ensure_loaded(Mod) of
+                {module, Mod} -> Mod;
+                _ -> erlang:error({template_error, {unknown_layout, View, Name}})
+            end
+    end.
 
 %% @doc Like {@link render/2}, returning `{error, Reason}' instead of raising. An
 %% expression of the template that raises (a `for' over something that is not a
@@ -86,8 +129,12 @@ render(View, Assigns) ->
 %% template is developer code, but one bad value must not take down the caller.
 -spec try_render(module(), map()) -> {ok, iodata()} | {error, term()}.
 try_render(View, Assigns) ->
+    try_render(View, Assigns, #{}).
+
+-spec try_render(module(), map(), render_opts()) -> {ok, iodata()} | {error, term()}.
+try_render(View, Assigns, Opts) ->
     try
-        {ok, render(View, Assigns)}
+        {ok, render(View, Assigns, Opts)}
     catch
         error:{template_error, Reason} -> {error, Reason};
         Class:Reason -> {error, {render_failed, Class, Reason}}
@@ -99,13 +146,16 @@ try_render(View, Assigns) ->
 %% {@link render/2}, with `{unknown_region, View, Region}' for a region the
 %% template does not have.
 -spec render_region(module(), atom(), map()) -> iodata().
-render_region(View, Region, Assigns) when is_atom(View), is_atom(Region), is_map(Assigns) ->
-    Mod = generated_module(View),
-    case code:ensure_loaded(Mod) of
-        {module, Mod} -> Mod:render_region(Region, Assigns);
-        {error, _} -> erlang:error({template_error, {no_template, View}})
-    end;
-render_region(View, _Region, Assigns) ->
+render_region(View, Region, Assigns) ->
+    render_region(View, Region, Assigns, #{}).
+
+%% @doc Like {@link render_region/3} for the pair of `View' and the layout in `Opts' (the regions
+%% of a layout exist only in the pairs that use it, so a region of the admin layout is
+%% `{unknown_region, View, Region}' when rendered with another).
+-spec render_region(module(), atom(), map(), render_opts()) -> iodata().
+render_region(View, Region, Assigns, Opts) when is_atom(View), is_atom(Region), is_map(Assigns), is_map(Opts) ->
+    (variant(View, Opts)):render_region(Region, Assigns);
+render_region(View, _Region, Assigns, _Opts) ->
     erlang:error({template_error, {invalid_assigns, View, Assigns}}).
 
 %% @doc Like {@link render_region/3}, returning `{error, Reason}' instead of
@@ -113,8 +163,12 @@ render_region(View, _Region, Assigns) ->
 %% is logged and the page's session goes on (see {@link try_render/2}).
 -spec try_render_region(module(), atom(), map()) -> {ok, iodata()} | {error, term()}.
 try_render_region(View, Region, Assigns) ->
+    try_render_region(View, Region, Assigns, #{}).
+
+-spec try_render_region(module(), atom(), map(), render_opts()) -> {ok, iodata()} | {error, term()}.
+try_render_region(View, Region, Assigns, Opts) ->
     try
-        {ok, render_region(View, Region, Assigns)}
+        {ok, render_region(View, Region, Assigns, Opts)}
     catch
         error:{template_error, Reason} -> {error, Reason};
         Class:Reason -> {error, {render_failed, Class, Reason}}
@@ -124,19 +178,33 @@ try_render_region(View, Region, Assigns) ->
 %% (`Name => #{tag, line, variables}').
 -spec regions(module()) -> {ok, map()} | {error, {no_template, module()}}.
 regions(View) ->
-    Mod = generated_module(View),
-    case code:ensure_loaded(Mod) of
-        {module, Mod} -> {ok, maps:get(regions, Mod:info())};
+    regions(View, #{}).
+
+%% @doc The regions of the pair of `View' and the layout in `Opts'.
+-spec regions(module(), render_opts()) ->
+    {ok, map()} | {error, {no_template, module()} | {unknown_layout, module(), term()}}.
+regions(View, Opts) ->
+    try
+        {ok, maps:get(regions, (variant(View, Opts)):info())}
+    catch
+        error:{template_error, Reason} -> {error, Reason}
+    end.
+
+%% @doc The default layout of the view's template: `{ok, Name}', or
+%% `{ok, none}' for a standalone page (the `layout' of the view's route options).
+-spec layout(module()) -> {ok, atom()} | {error, {no_template, module()}}.
+layout(View) ->
+    case code:ensure_loaded(generated_module(View)) of
+        {module, Mod} -> {ok, maps:get(layout, Mod:info())};
         {error, _} -> {error, {no_template, View}}
     end.
 
-%% @doc The layout the view's template was compiled with: `{ok, Name}', or
-%% `{ok, none}' for a standalone page (the layout of the view's route options).
--spec layout(module()) -> {ok, atom()} | {error, {no_template, module()}}.
-layout(View) ->
-    Mod = generated_module(View),
-    case code:ensure_loaded(Mod) of
-        {module, Mod} -> {ok, maps:get(layout, Mod:info())};
+%% @doc The layouts the view may be rendered with (`render/3'): the default and the `layouts'
+%% of its route options.
+-spec layouts(module()) -> {ok, [atom()]} | {error, {no_template, module()}}.
+layouts(View) ->
+    case code:ensure_loaded(generated_module(View)) of
+        {module, Mod} -> {ok, maps:get(layouts, Mod:info())};
         {error, _} -> {error, {no_template, View}}
     end.
 
@@ -212,7 +280,8 @@ analyze_and_compile(View, Full0, File, Layout, Opts) ->
         {ok, Analyzed, Warnings} ->
             case weberl_template_parser:check_scope(Analyzed, File) of
                 ok ->
-                    case weberl_template_compiler:compile(View, Analyzed, File, layout_name(Layout)) of
+                    CompileOpts = maps:with([variant, layouts], Opts),
+                    case weberl_template_compiler:compile(View, Analyzed, File, layout_name(Layout), CompileOpts) of
                         {ok, Mod, Bin} -> {ok, {Mod, Bin, File, Warnings}};
                         {error, _} = Error -> Error
                     end;

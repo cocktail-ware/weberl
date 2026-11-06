@@ -5,7 +5,7 @@
 -module(weberl_route).
 
 -export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1, csrf/1, layout/1,
-         limits/1,
+         layouts/1, limits/1,
          normalize_path/1, check_opts/1, check_live/1,
          normalize_pattern/1, pattern_parts/1, is_dynamic/1, shape/1, request_segments/1, decode_segment/1]).
 -export_type([t/0, origin/0, path/0, live/0, opts/0]).
@@ -20,7 +20,7 @@
 %% (no process per page; it only receives the topics of its handler, see
 %% `weberl_live'); default `true'.
 -type opts() :: #{live => live(), session => boolean(), csrf => true | origin | false,
-                  layout => atom(), limits => weberl_limits:limits()}.
+                  layout => atom(), layouts => [atom()] | all, limits => weberl_limits:limits()}.
 
 -record #route{
     path    :: path(),
@@ -81,6 +81,11 @@ layout(#route{opts = O}) ->
         error -> none
     end.
 
+%% @doc The other layouts the route allows (`layouts => [admin, none]' or `all' in its options),
+%% besides the default `layout'; `[]' when it declares none. Resolved by {@link weberl_views}.
+-spec layouts(t()) -> [atom()] | all.
+layouts(#route{opts = O}) -> maps:get(layouts, O, []).
+
 %% @doc The CSRF mode of the route, `true' unless declared otherwise (see
 %% {@link weberl_csrf}).
 -spec csrf(t()) -> weberl_csrf:mode().
@@ -91,14 +96,15 @@ csrf(#route{opts = O}) -> maps:get(csrf, O, true).
 limits(#route{opts = O}) -> maps:get(limits, O, #{}).
 
 %% @doc Validate a route options map. The keys are `live', `session', `csrf',
-%% `layout' (an atom) and `limits' (a map, see `weberl_limits'); a session-less page has to
+%% `layout' (an atom), `layouts' (a list of atoms or `all') and `limits' (a map, see `weberl_limits'); a session-less page has to
 %% be live.
 -spec check_opts(term()) -> {ok, opts()} | {error, term()}.
 check_opts(Opts) when is_map(Opts) ->
-    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf, K =/= layout, K =/= limits] of
+    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf, K =/= layout, K =/= layouts,
+               K =/= limits] of
         [] ->
             Checks = [check_kind(Opts), check_session(Opts), check_csrf(Opts), check_layout(Opts),
-                      check_limits(Opts)],
+                      check_layouts(Opts), check_limits(Opts)],
             case [E || {error, _} = E <- Checks] of
                 [] -> {ok, Opts};
                 [Error | _] -> Error
@@ -130,6 +136,18 @@ check_layout(Opts) ->
         error -> ok;
         {ok, Name} when is_atom(Name) -> ok;
         {ok, Other} -> {error, {invalid_layout, Other}}
+    end.
+
+check_layouts(Opts) ->
+    case maps:find(layouts, Opts) of
+        error -> ok;
+        {ok, all} -> ok;
+        {ok, Names} when is_list(Names) ->
+            case lists:all(fun is_atom/1, Names) of
+                true -> ok;
+                false -> {error, {invalid_layouts, Names}}
+            end;
+        {ok, Other} -> {error, {invalid_layouts, Other}}
     end.
 
 check_csrf(Opts) ->

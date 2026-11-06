@@ -1038,9 +1038,8 @@ next to its page kind; a view without `layout` stays a standalone page:
 `weberl_route:layout(Route)` is `{ok, main}` or `none` (what the route declares);
 `weberl_template:layout(View)` is `{ok, main}` or `{ok, none}` (what the view was compiled with).
 Only filesystem views have templates, so a declarative route that
-names a layout is an error (`layout_needs_a_filesystem_view`). The layout is chosen when the router
-starts, once per view: it cannot depend on the request (see "Layouts chosen at runtime" in
-`ROADMAP.md`).
+names a layout is an error (`layout_needs_a_filesystem_view`). `layout` is the view's **default**; to
+render it with another one see "Choosing the layout per render" below.
 
 A layout is named by its file's base name (names must be unique across the directories).
 Layout files are never associated with views, so they may also sit below a filesystem root.
@@ -1059,6 +1058,38 @@ Where}`); `{duplicate_layouts, [{Name, Files}]}`; and in `{invalid_templates, [{
 Reason}]}`: `{unknown_layout, Name}`, `layout_without_template` (the route options ask for a
 layout but the view has no template), `content_outside_layout` (a view or a standalone
 template uses `{: content :}`) and `{duplicate_region, Name, LayoutFile, ViewFile}`.
+
+#### Choosing the layout per render
+
+A route lists the layouts its view may be rendered with, and the handler picks one when it renders:
+
+```erlang
+-weberl_route(#{layout => main, layouts => [admin, none]}).   %% default main; also admin, and the bare view
+
+handle(Request) ->
+    Layout = case weberl_request:header(Request, <<"x-embed">>) of {ok, _} -> none; _ -> main end,
+    weberl_response:html(200, weberl_template:render(?MODULE, #{...}, #{layout => Layout})).
+```
+
+- `layout` is the default (what `render/2` uses); `layouts` adds others; `none` is the view bare, with no
+  layout; `layouts => all` allows every layout of the router's `layouts` directories. The allowed set is the
+  default plus the list.
+- **Every allowed pair is composed and compiled when the router starts**, so the checks of a layout (a fill
+  the layout has no slot for, a region name used by both files, a fill in a view allowed as `none`) fail the
+  start with file and line, never a render. Cost: one module per allowed pair, not views times all layouts.
+  The default pair is the view's own generated module; the others are `<view>__weberl_template__<layout>`.
+- A name outside the allowed set raises `{template_error, {unknown_layout, View, Name}}` (`try_render/3`
+  returns it): it is the handler's decision, a programming error, and Weberl never reads it from the request.
+  `weberl_template:layout/1` is the default and `layouts/1` the allowed set.
+- **Regions**: the regions of the view are in every pair; those of a layout only in the pairs that use it. So
+  `render_region/4` and `regions/2` take the layout too (`#{layout => Name}`); a region the pair does not have
+  is `{unknown_region, View, Region}`.
+- **Live pages**: `weberl_live:mount(View, Request, ViewData, #{layout => Name})` renders with that layout and
+  the session remembers it in the view data (`weberl_view_data:layout/1`, `with_layout/2`), so the page's
+  regions are re-rendered with the same pair; `weberl_live:update/3` reads it from the session, and a
+  record built afresh by a callback keeps it. A page without a session names it itself:
+  `weberl_live:update_topic(Topic, View, Region, Assigns, #{layout => Name})`.
+- Not there yet: nested layouts (a layout inside a layout).
 
 #### Slots
 

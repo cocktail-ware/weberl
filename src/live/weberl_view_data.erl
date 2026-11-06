@@ -11,6 +11,7 @@
 %%   <li>`private': the handler's own data (who the user is, what the page
 %%       was opened for, ...), never rendered.</li>
 %% </ul>
+%% The record also remembers the layout the page was mounted with (`with_layout/2').
 %% It is the Phoenix idea of keeping what a regular HTTP request knew (cookie,
 %% authenticated user) for the life of the page, after which the browser talks
 %% only through the live connection. `handle_request/3' of a page with a session
@@ -25,13 +26,16 @@
 
 -export([new/1, new/2, assigns/1, private/1,
          with_assigns/2, with_private/2, set_assigns/2, set_private/2,
+         layout/1, with_layout/2, render_opts/1,
          is_view_data/1, changed_assigns/2]).
 -export_type([t/0]).
 -export_record([view_data]).
 
 -record #view_data{
     assigns = #{} :: map(),
-    private = #{} :: map()
+    private = #{} :: map(),
+    %% the layout the page is rendered with; undefined: the view's default
+    layout = undefined :: undefined | atom()
 }.
 
 -type t() :: #view_data{}.
@@ -70,6 +74,21 @@ set_assigns(Assigns, #view_data{} = V) when is_map(Assigns) ->
 -spec set_private(map(), t()) -> t().
 set_private(Private, #view_data{} = V) when is_map(Private) ->
     V#view_data{private = Private}.
+
+%% @doc The layout the page is rendered with (see `weberl_template:render/3'); `undefined' is
+%% the view's default layout. The session renders and re-renders the page's regions with it.
+-spec layout(t()) -> undefined | atom().
+layout(#view_data{layout = L}) -> L.
+
+%% @doc Render the page with `Layout' (one the route allows, `none' for the bare view).
+-spec with_layout(atom(), t()) -> t().
+with_layout(Layout, #view_data{} = V) when is_atom(Layout) ->
+    V#view_data{layout = Layout}.
+
+%% @doc The options for `weberl_template:render/3' and friends that this record stands for.
+-spec render_opts(t()) -> weberl_template:render_opts().
+render_opts(#view_data{layout = undefined}) -> #{};
+render_opts(#view_data{layout = L}) -> #{layout => L}.
 
 -spec is_view_data(term()) -> boolean().
 is_view_data(#view_data{}) -> true;

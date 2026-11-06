@@ -5,8 +5,10 @@
 %% Layouts are the `.weberl' files below the router's `layouts' directories,
 %% named by their base name (`layouts/main.weberl' is `main'). A view selects
 %% one in its route options, `-weberl_route(#{layout => main}).'; a view without a
-%% layout is a standalone page. Layouts are composed when the router starts, so
-%% the choice is per view, not per request. Layout files are not associated with
+%% layout is a standalone page. Layouts are composed when the router starts. That
+%% layout is the view's default; `layouts => [admin, none]' (or `all') lists others the view may
+%% be rendered with, chosen per render (`weberl_template:render/3'). Every allowed pair is
+%% composed and compiled at start. Layout files are not associated with
 %% views, so they may also live below a filesystem root.
 %%
 %% All templates are compiled before any is loaded, so a router either gets all
@@ -27,11 +29,12 @@ prepare(Router, Table) ->
     Routes = weberl_table:routes(Table),
     FsRoutes = [R || R <- Routes, weberl_route:origin(R) =:= filesystem],
     Views = [{weberl_route:handler(R), weberl_route:source(R)} || R <- FsRoutes],
-    %% View => {ok, Layout} | none: what the view's route options say
-    Selected = maps:from_list([{weberl_route:handler(R), weberl_route:layout(R)} || R <- FsRoutes]),
+    %% View => {Default, Listed}: what the view's route options say (`layout' and `layouts')
+    Selected = maps:from_list([{weberl_route:handler(R), {default(R), weberl_route:layouts(R)}}
+                               || R <- FsRoutes]),
     Misplaced = [{weberl_route:handler(R), layout_needs_a_filesystem_view}
                  || R <- Routes, weberl_route:origin(R) =/= filesystem,
-                    weberl_route:layout(R) =/= none],
+                    weberl_route:layout(R) =/= none orelse weberl_route:layouts(R) =/= []],
     case Misplaced of
         [] -> prepare(Router, Views, Selected, Table);
         _ -> {error, {invalid_templates, Misplaced}}
@@ -71,25 +74,55 @@ layouts(Files) ->
 compile_all(Pairs, Views, Layouts, Selected, Table) ->
     Templated = [View || {View, _} <- Pairs],
     Orphans = [{View, layout_without_template} || {View, _} <- Views,
-                   not lists:member(View, Templated), maps:get(View, Selected) =/= none],
+                   not lists:member(View, Templated), maps:get(View, Selected) =/= {none, []}],
     Results = [{View, compile(View, File, Layouts, maps:get(View, Selected), #{routes => Table})}
                || {View, File} <- Pairs],
     case Orphans ++ [{View, Reason} || {View, {error, Reason}} <- Results] of
         [] ->
             lists:foreach(fun({_, {ok, Compiled}}) ->
-                                  log_warnings(weberl_template:warnings(Compiled)),
-                                  weberl_template:load(Compiled)
+                                  log_warnings(lists:usort(lists:append([weberl_template:warnings(C)
+                                                                         || C <- Compiled]))),
+                                  lists:foreach(fun weberl_template:load/1, Compiled)
                           end, Results);
         Errors ->
             {error, {invalid_templates, Errors}}
     end.
 
-compile(View, File, _Layouts, none, Opts) ->
-    weberl_template:compile_file(View, File, none, Opts);
-compile(View, File, Layouts, {ok, Name}, Opts) ->
-    case Layouts of
-        #{Name := Layout} -> weberl_template:compile_file(View, File, Layout, Opts);
-        _ -> {error, {unknown_layout, Name}}
+%% The default layout the route declares, `none' for a bare view.
+default(Route) ->
+    case weberl_route:layout(Route) of
+        {ok, Name} -> Name;
+        none -> none
+    end.
+
+%% Every allowed pair of the view: the default one (the view's own module) and one module per
+%% other layout of the route's `layouts'. {ok, [Compiled]} or the first error.
+compile(View, File, Layouts, {Default, Listed}, Opts) ->
+    Others = case Listed of
+                 all -> lists:sort(maps:keys(Layouts));
+                 Names -> Names
+             end,
+    Allowed = [Default | [N || N <- lists:usort(Others), N =/= Default]],
+    Results = [compile_pair(View, File, Layouts, Name, Name =:= Default,
+                            Opts#{layouts => Allowed}) || Name <- Allowed],
+    case [Error || {error, _} = Error <- Results] of
+        [] -> {ok, [C || {ok, C} <- Results]};
+        [Error | _] -> Error
+    end.
+
+compile_pair(View, File, Layouts, Name, IsDefault, Opts0) ->
+    Opts = case IsDefault of
+               true -> Opts0;
+               false -> Opts0#{variant => Name}
+           end,
+    case Name of
+        none ->
+            weberl_template:compile_file(View, File, none, Opts);
+        _ ->
+            case Layouts of
+                #{Name := Layout} -> weberl_template:compile_file(View, File, Layout, Opts);
+                _ -> {error, {unknown_layout, Name}}
+            end
     end.
 
 

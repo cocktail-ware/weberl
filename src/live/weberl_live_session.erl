@@ -137,7 +137,15 @@ apply_view(keep, _State, Data) ->
     Data;
 apply_view(New, _State, #data{view = undefined} = Data) ->
     Data#data{view = New};
-apply_view(New, State, #data{view = Old, handler = Handler} = Data0) ->
+apply_view(New0, State, #data{view = Old, handler = Handler} = Data0) ->
+    %% a record built afresh by a callback keeps the layout the page was mounted with
+    New = case weberl_view_data:layout(New0) of
+              undefined -> case weberl_view_data:layout(Old) of
+                               undefined -> New0;
+                               Layout -> weberl_view_data:with_layout(Layout, New0)
+                           end;
+              _ -> New0
+          end,
     Data = Data0#data{view = New},
     case weberl_view_data:changed_assigns(Old, New) of
         [] -> Data;
@@ -146,19 +154,20 @@ apply_view(New, State, #data{view = Old, handler = Handler} = Data0) ->
 
 rerender(_Changed, undefined, _Assigns, _State, Data) ->
     Data;
-rerender(Changed, Handler, Assigns, State, Data) ->
-    case weberl_template:regions(Handler) of
+rerender(Changed, Handler, Assigns, State, #data{view = View} = Data) ->
+    Opts = weberl_view_data:render_opts(View),
+    case weberl_template:regions(Handler, Opts) of
         {ok, Regions} ->
             Affected = [{Line, Name} || {Name, #{variables := Vars, line := Line}} <- maps:to_list(Regions),
                                         lists:any(fun(V) -> lists:member(V, Changed) end, Vars)],
-            lists:foldl(fun({_Line, Region}, Acc) -> push_region(Handler, Region, Assigns, State, Acc) end,
+            lists:foldl(fun({_Line, Region}, Acc) -> push_region(Handler, Region, Assigns, Opts, State, Acc) end,
                         Data, lists:sort(Affected));
         {error, _} ->
             Data
     end.
 
-push_region(Handler, Region, Assigns, State, #data{id = Id} = Data) ->
-    case weberl_live:region_event(Handler, Region, Assigns) of
+push_region(Handler, Region, Assigns, Opts, State, #data{id = Id} = Data) ->
+    case weberl_live:region_event(Handler, Region, Assigns, Opts) of
         {ok, {Name, Payload}} ->
             deliver(Name, Payload, State, Data);
         {error, Reason} ->

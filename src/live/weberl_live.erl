@@ -44,8 +44,8 @@
 -export([open/2, open/3, new_page_id/0, downgrade/2, push/3, publish/3, attach/2, detach/2, release/2, request/3,
          close/1, close_owner/1, whereis/1, info/1, poll_enabled/1, channels/1,
          check_topics/1, topics/2, client_path/0, engine_path/0, client_version/0,
-         sse_path/1, update/3, update_topic/4, region_event/3,
-         mount/3, assign/2, modify/2, view/1, register_connection/1, stats/0]).
+         sse_path/1, update/3, update_topic/4, update_topic/5, region_event/3, region_event/4,
+         mount/3, mount/4, assign/2, modify/2, view/1, register_connection/1, stats/0]).
 -export_type([page_id/0, topic/0]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -111,7 +111,12 @@ publish(Topic, Name, Data) when is_binary(Topic), is_binary(Name) ->
 update(PageId, Region, Assigns) when is_atom(Region), is_map(Assigns) ->
     case info(PageId) of
         {ok, #{handler := Handler}} when Handler =/= undefined ->
-            case region_event(Handler, Region, Assigns) of
+            %% the layout the page was mounted with (a page that mounted nothing has the default)
+            Opts = case view(PageId) of
+                       {ok, ViewData} -> weberl_view_data:render_opts(ViewData);
+                       {error, _} -> #{}
+                   end,
+            case region_event(Handler, Region, Assigns, Opts) of
                 {ok, {Name, Payload}} -> push(PageId, Name, Payload);
                 {error, Reason} -> region_failed(Reason, #{page => PageId, region => Region})
             end;
@@ -126,9 +131,16 @@ update(PageId, Region, Assigns) when is_atom(Region), is_map(Assigns) ->
 %% view): the region is rendered once and published to every page subscribed
 %% to `Topic', on any node.
 -spec update_topic(topic(), module(), atom(), map()) -> ok | {error, term()}.
-update_topic(Topic, View, Region, Assigns) when is_binary(Topic), is_atom(View), is_atom(Region),
-                                                is_map(Assigns) ->
-    case region_event(View, Region, Assigns) of
+update_topic(Topic, View, Region, Assigns) ->
+    update_topic(Topic, View, Region, Assigns, #{}).
+
+%% @doc Like {@link update_topic/4}, rendering with the layout in `Opts' (`#{layout => Name}'):
+%% a page without a session has no record that remembers its layout, so the caller names it.
+%% Every page that follows the topic gets this one rendering.
+-spec update_topic(topic(), module(), atom(), map(), weberl_template:render_opts()) -> ok | {error, term()}.
+update_topic(Topic, View, Region, Assigns, Opts) when is_binary(Topic), is_atom(View), is_atom(Region),
+                                                      is_map(Assigns), is_map(Opts) ->
+    case region_event(View, Region, Assigns, Opts) of
         {ok, {Name, Payload}} -> publish(Topic, Name, Payload);
         {error, Reason} -> region_failed(Reason, #{topic => Topic, region => Region})
     end.
@@ -137,7 +149,12 @@ update_topic(Topic, View, Region, Assigns) when is_binary(Topic), is_atom(View),
 %% rendered from `Assigns'; the session uses it too.
 -spec region_event(module(), atom(), map()) -> {ok, {binary(), binary()}} | {error, term()}.
 region_event(View, Region, Assigns) ->
-    case weberl_template:try_render_region(View, Region, Assigns) of
+    region_event(View, Region, Assigns, #{}).
+
+-spec region_event(module(), atom(), map(), weberl_template:render_opts()) ->
+    {ok, {binary(), binary()}} | {error, term()}.
+region_event(View, Region, Assigns, Opts) ->
+    case weberl_template:try_render_region(View, Region, Assigns, Opts) of
         {ok, Html} ->
             Payload = iolist_to_binary(json:encode(#{region => Region, html => iolist_to_binary(Html)})),
             {ok, {?REGION_EVENT, Payload}};
@@ -159,7 +176,16 @@ mount(View, Request, ViewData) ->
             undefined -> ok;
             PageId -> session_call(PageId, {mount, ViewData})
         end,
-    weberl_template:render(View, weberl_view_data:assigns(ViewData)).
+    weberl_template:render(View, weberl_view_data:assigns(ViewData), weberl_view_data:render_opts(ViewData)).
+
+%% @doc Like {@link mount/3}, rendering the page with the layout in `Opts' (`#{layout => Name}', one
+%% the view's route allows, see `weberl_template:render/3'). The session remembers it with the
+%% record, so the page's regions are re-rendered with the same layout.
+-spec mount(module(), weberl_request:t(), weberl_view_data:t(), weberl_template:render_opts()) -> iodata().
+mount(View, Request, ViewData, #{layout := Layout}) ->
+    mount(View, Request, weberl_view_data:with_layout(Layout, ViewData));
+mount(View, Request, ViewData, #{}) ->
+    mount(View, Request, ViewData).
 
 %% @doc Merge `Changes' into the page's assigns and re-render and push the
 %% regions that use a variable whose value changed. `{error, no_view}' when

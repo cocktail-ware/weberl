@@ -54,24 +54,12 @@ specification; kept here so they don't clutter active work.
   literal map at compile time), typed parameters (`:id` that must be an integer), and a way to build a link
   from a route name instead of a path.
 
-## Layouts chosen at runtime
-- Today a view's layout is fixed when the router starts: layout and view are composed at compile time
-  into one generated module per view. The user wants templates rendered with a layout chosen at runtime
-  (an admin layout versus a public one, an embedded versus a full page, per-tenant chrome). To design:
-  - the API: for example `weberl_template:render(?MODULE, Assigns, #{layout => Name})`, or a layout
-    returned by the handler; and what the choice may depend on (the request, the user, a header for
-    partial/embedded renders);
-  - how: compose each (view, layout) pair lazily on first use and cache the module (bounded: layouts are
-    a fixed set, so views x layouts), versus compiling every layout for every view at startup, versus a
-    runtime composition that renders the layout around already rendered view parts;
-  - regions: with a runtime layout, a region of the layout exists only for some renders, so
-    `render_region/3` and `regions/1` must be told which layout (the live session would have to remember
-    it, as it remembers its assigns), and region names must still be unique across the pair;
-  - validation: a view's `{: fill :}` blocks must match the slots of every layout it can be rendered
-    with, which compile-time composition checks once and runtime selection would check per pair;
-  - nested layouts (a layout inside a layout) belong to the same design.
-- `weberl_template:layout/1` already reports what a view was compiled with; the runtime form would have
-  to report the default and the allowed set.
+## Layouts
+- Runtime layouts are built (`HANDOFF.md`, decision 15): `layouts` route option, `render/3`, the layout
+  remembered by live sessions. Still open:
+  - nested layouts (a layout inside a layout): needs a parent link in the layout and a second composition
+    step; each allowed pair would compose the chain;
+  - picking the layout per request without the handler passing it (a route-level function of the request).
 
 ## Session
 - Automatic loading of the request's session into the handler's response (`weberl_session:run/2`, the

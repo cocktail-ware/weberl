@@ -468,6 +468,30 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `blocks_only_in_html_text_test` narrowed, `weberl_live_blocks_tests` (a conditional attribute in a region is
   re-rendered with it); 1023 eunit tests; browser suite not re-run. README "Conditional attributes". Next in
   the user's order: **runtime layouts** (the last item).
+- **Decision 15, runtime layouts (user accepted 2026-11-06).** The layout is chosen **per render**, among an
+  allowed set declared by the route. (a) Route options: `layout => main` stays the default (used by `render/2`),
+  `layouts => [admin, none]` adds the others (`none` renders the view bare), `layouts => all` allows every
+  discovered layout. Allowed set = default plus listed. (b) Every allowed (view, layout) pair is composed and
+  compiled at router start (errors as today: unknown fill, duplicate region, `fill_without_layout` when `none`
+  is allowed for a view with fills); the default pair keeps the module `<view>__weberl_template`, the others are
+  `<view>__weberl_template__<layout>`. (c) `weberl_template:render/3`, `try_render/3`, `render_region/4`,
+  `try_render_region/4`, `regions/2` take `#{layout => Name}`; a name outside the allowed set raises
+  `{template_error, {unknown_layout, View, Name}}` (programming error; Weberl never reads the name from the
+  request). `layout/1` is the default, new `layouts/1` the allowed set. (d) Live: `weberl_view_data` keeps the
+  layout (`with_layout/2`, `layout/1`), `weberl_live:mount/4` takes `#{layout => Name}` and the session renders
+  and re-renders regions with that pair; `update/3` reads it from the session; `update_topic/5` takes it in its
+  options. Rejected: wrapping already rendered view parts at runtime (breaks region dependencies and fill
+  checks). Left for later: nested layouts, picking a layout per request without the handler passing it.
+- **Runtime layouts built (2026-11-06, decision 15).** `weberl_template_compiler:generated_module/2`,
+  `compile/5` (`variant`, `layouts`; `info/0` has `layouts`); `weberl_template:render/3`, `try_render/3`,
+  `render_region/4`, `try_render_region/4`, `regions/2`, `layouts/1` (the allowed set is read from the default
+  module's `info/0`, so a stale variant module left by an earlier router start is never used);
+  `weberl_route:layouts/1` and its check; `weberl_views` compiles every allowed pair (first error per view);
+  `weberl_view_data:layout/1`, `with_layout/2`, `render_opts/1`; `weberl_live:mount/4`, `update_topic/5`,
+  `region_event/4`; the session re-renders with the page's layout and a record built afresh keeps it.
+  Found by the tests: a non-atom layout name hit `atom_to_list` before the membership check. Tests:
+  `weberl_runtime_layout_tests` (19); 1042 eunit tests; browser suite not re-run. README "Choosing the layout
+  per render". **All items of the user's order are done.**
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)

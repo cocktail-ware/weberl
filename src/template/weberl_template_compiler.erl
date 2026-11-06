@@ -6,7 +6,7 @@
 %% file, so stack traces point at the template.
 -module(weberl_template_compiler).
 
--export([generated_module/1, compile/3, compile/4]).
+-export([generated_module/1, generated_module/2, compile/3, compile/4, compile/5]).
 
 %% The element around a region: the `weberl-region' web component, or the
 %% element the template asked for, marked with `data-weberl-region'. The browser
@@ -21,6 +21,12 @@ wrapper(Name, Tag) ->
 generated_module(View) ->
     list_to_atom(atom_to_list(View) ++ "__weberl_template").
 
+%% @doc The module of one (view, layout) pair, `none' being the bare view:
+%% `home_view__weberl_template__admin'. (The default pair is also `generated_module/1'.)
+-spec generated_module(module(), atom()) -> module().
+generated_module(View, Layout) ->
+    list_to_atom(atom_to_list(View) ++ "__weberl_template__" ++ atom_to_list(Layout)).
+
 %% @doc Compile an AST. Returns the generated module name and its object code;
 %% nothing is loaded.
 -spec compile(module(), weberl_template_parser:ast(), file:filename_all()) ->
@@ -33,8 +39,20 @@ compile(View, Ast, File) ->
 -spec compile(module(), weberl_template_parser:ast(), file:filename_all(), atom()) ->
     {ok, module(), binary()} | {error, term()}.
 compile(View, Ast, File, Layout) ->
-    Mod = generated_module(View),
-    Forms = forms(Mod, View, Ast, File, Layout),
+    compile(View, Ast, File, Layout, #{}).
+
+%% @doc Like {@link compile/4}. Options: `variant' (the module is the one of the (view, layout)
+%% pair `variant', see {@link generated_module/2}, instead of the default pair's) and `layouts'
+%% (the layouts the view may be rendered with, recorded in `info/0').
+-spec compile(module(), weberl_template_parser:ast(), file:filename_all(), atom(),
+              #{variant => atom(), layouts => [atom()]}) ->
+    {ok, module(), binary()} | {error, term()}.
+compile(View, Ast, File, Layout, Opts) ->
+    Mod = case maps:find(variant, Opts) of
+              {ok, Variant} -> generated_module(View, Variant);
+              error -> generated_module(View)
+          end,
+    Forms = forms(Mod, View, Ast, File, Layout, maps:get(layouts, Opts, [Layout])),
     case compile:forms(Forms, [return_errors, binary]) of
         {ok, Mod, Bin} -> {ok, Mod, Bin};
         {error, Errors, _Warnings} -> {error, {compile_failed, Errors}}
@@ -43,11 +61,11 @@ compile(View, Ast, File, Layout) ->
 %% `render/1' renders the whole template. `render_region/2' renders the content
 %% of one region (what goes inside its wrapper element) for the browser to swap
 %% in; `info/0' lists the regions with their variables.
-forms(Mod, View, Ast, File, Layout) ->
+forms(Mod, View, Ast, File, Layout, Layouts) ->
     Regions = weberl_template_parser:regions(Ast),
     Info = #{view => View, file => unicode:characters_to_binary(File),
              variables => weberl_template_parser:variables(Ast),
-             regions => Regions, layout => Layout},
+             regions => Regions, layout => Layout, layouts => Layouts},
     RegionClauses = [{clause, Line, [{atom, Line, Name}, {var, Line, 'Assigns'}], [],
                       [body(Children, View)]}
                      || {Name, Line, Children} <- region_nodes(Ast)],
