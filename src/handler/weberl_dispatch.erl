@@ -29,7 +29,9 @@ dispatch(Request0, Table) ->
         {ok, Route, Raw} ->
             case decode_params(Raw) of
                 {ok, Params} ->
-                    Request = weberl_request:with_params(Request0, Params),
+                    Limits = maps:merge(weberl_table:limits(Table), weberl_route:limits(Route)),
+                    Request = weberl_request:with_route(weberl_request:with_params(Request0, Params),
+                                                        #{handler => weberl_route:handler(Route), limits => Limits}),
                     routed(Route, Request);
                 error ->
                     %% a `%' that is not an escape, or a value that is not UTF-8
@@ -46,6 +48,9 @@ routed(Route, Request) ->
     case weberl_csrf:check(weberl_route:csrf(Route), Request) of
         ok ->
             with_session(Request, fun() -> serve(weberl_route:live(Route), Route, Request) end);
+        {error, {limit_exceeded, _}} ->
+            %% the form that was read for the token is too big: already logged by weberl_limits
+            weberl_response:text(413, <<"Payload Too Large">>);
         {error, Reason} ->
             ?LOG_WARNING(#{what => csrf_rejected, reason => Reason,
                            method => weberl_request:method(Request),

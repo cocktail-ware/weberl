@@ -22,6 +22,7 @@
 %%   <li>`port/1': the port the listener actually bound (useful with port 0).</li>
 %%   <li>`cookies/1': the `{Name, Value}' pairs of the request's `Cookie' header(s).</li>
 %%   <li>`form/1': the decoded form of the request body (see below).</li>
+%%   <li>`multipart/1': the raw parts of a `multipart/form-data' body (see below).</li>
 %%   <li>`validate_static/1' (optional): check static mount options. Mounts are
 %%       served by the adapter before the route table is consulted.</li>
 %% </ul>
@@ -55,6 +56,14 @@
 %% an unreadable body is the transport's `{error, Reason}'.
 -callback form(weberl_request:t()) ->
     {ok, [{binary(), binary() | true}]} | {error, term()}.
+%% The parts of a `multipart/form-data' body, raw: `[{Headers, Body}]' with header names
+%% lowercased and the bodies as sent. `weberl_multipart' reads the `Content-Disposition' and
+%% applies the limits, so an adapter only splits the body. Other content types: `{error,
+%% unsupported_content_type}' (or `{error, no_content_type}'); a body that is not valid
+%% multipart: `{error, malformed_multipart}'; an unreadable body is the transport's
+%% `{error, Reason}'.
+-callback multipart(weberl_request:t()) ->
+    {ok, [{[{binary(), binary()}], binary()}]} | {error, term()}.
 %% Optional: static asset mounts. Receives the normalized
 %% `[{UrlPrefix, Source, Opts}]' from the listener record and checks the
 %% adapter-specific `Opts'. An adapter that does not export this rejects any

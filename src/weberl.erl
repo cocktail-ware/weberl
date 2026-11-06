@@ -50,7 +50,11 @@ build(Config) ->
             case discover_all(weberl_config:filesystem(Valid), []) of
                 {ok, Fs} ->
                     case weberl_decl:collect(weberl_config:modules(Valid)) of
-                        {ok, Decl} -> weberl_table:assemble(Fs, Decl);
+                        {ok, Decl} ->
+                            case weberl_table:assemble(Fs, Decl) of
+                                {ok, Table} -> {ok, weberl_table:with_limits(Table, weberl_config:limits(Valid))};
+                                {error, _} = Error -> Error
+                            end;
                         {error, _} = Error -> Error
                     end;
                 {error, _} = Error ->

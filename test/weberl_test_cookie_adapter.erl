@@ -4,7 +4,7 @@
 -behaviour(weberl_adapter).
 
 -export([validate_options/1, start_listener/3, stop_listener/1, port/1,
-         cookies/1, form/1, request/1, request/2]).
+         cookies/1, form/1, multipart/1, request/1, request/2]).
 
 validate_options(_) -> ok.
 start_listener(Name, _Listener, _Table) -> {ok, Name}.
@@ -22,6 +22,8 @@ cookies(Request) ->
     end.
 
 form(_) -> {error, no_content_type}.
+
+multipart(_) -> {error, no_content_type}.
 
 %% A GET request carrying these cookies.
 request(Cookies) -> request(<<"GET">>, Cookies).

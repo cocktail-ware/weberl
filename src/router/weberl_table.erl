@@ -13,7 +13,7 @@
 %% </ol>
 -module(weberl_table).
 
--export([assemble/2, lookup/2, match/2, handler/2, routes/1, shadowed/1]).
+-export([assemble/2, lookup/2, match/2, handler/2, routes/1, shadowed/1, with_limits/2, limits/1]).
 -export_type([t/0, params/0]).
 -export_record([table]).
 
@@ -24,7 +24,9 @@
     routes   = [] :: [weberl_route:t()],
     index    = #{} :: #{weberl_route:path() => weberl_route:t()},
     trie     = undefined :: trie_node() | undefined,
-    shadowed = [] :: [weberl_route:t()]
+    shadowed = [] :: [weberl_route:t()],
+    %% the form limits of the router (`weberl_limits'), under each route's own
+    limits   = #{} :: weberl_limits:limits()
 }.
 
 -type trie_node() :: #{static := #{binary() => trie_node()},
@@ -112,6 +114,14 @@ handler(Path, Table) ->
 
 -spec routes(t()) -> [weberl_route:t()].
 routes(#table{routes = R}) -> R.
+
+%% @doc The table with the form limits of its router.
+-spec with_limits(t(), weberl_limits:limits()) -> t().
+with_limits(#table{} = T, Limits) when is_map(Limits) -> T#table{limits = Limits}.
+
+%% @doc The form limits of the router (`#{}' when it sets none).
+-spec limits(t()) -> weberl_limits:limits().
+limits(#table{limits = L}) -> L.
 
 %% @doc Declarative routes dropped because a filesystem route has the same path.
 -spec shadowed(t()) -> [weberl_route:t()].

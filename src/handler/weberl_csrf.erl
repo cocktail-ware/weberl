@@ -42,7 +42,10 @@
 -export_type([mode/0, reason/0]).
 
 -type mode() :: true | origin | false.
--type reason() :: origin_mismatch | no_cookie | invalid_cookie | no_token | token_mismatch.
+%% `{limit_exceeded, Limit}': the urlencoded body that was read for the token is over a
+%% form limit (logged by `weberl_limits'; dispatch answers `413', not `403').
+-type reason() :: origin_mismatch | no_cookie | invalid_cookie | no_token | token_mismatch
+                | {limit_exceeded, weberl_limits:limit()}.
 
 -define(LABEL, <<"weberl-csrf">>).
 -define(NONCE_BYTES, 16).
@@ -122,9 +125,9 @@ allowed_origins() ->
     [iolist_to_binary(O) || O <- application:get_env(weberl, csrf_origins, [])].
 
 %% @doc Check the token of a request: the cookie must hold one of ours and the
-%% request must send the same, in the `x-csrf-token' header or the `_csrf' field of
-%% an urlencoded form.
--spec verify(weberl_request:t()) -> ok | {error, no_cookie | invalid_cookie | no_token | token_mismatch}.
+%% request must send the same, in the `x-csrf-token' header, the `_csrf' query parameter
+%% (multipart forms) or the `_csrf' field of an urlencoded form.
+-spec verify(weberl_request:t()) -> ok | {error, reason()}.
 verify(Request) ->
     case weberl_request:cookie(Request, cookie_name()) of
         error ->
@@ -137,6 +140,8 @@ verify(Request) ->
                     case submitted(Request) of
                         error ->
                             {error, no_token};
+                        {limit, Limit} ->
+                            {error, Limit};
                         {ok, Sent} ->
                             case equal(Sent, Cookie) of
                                 true -> ok;
@@ -146,17 +151,40 @@ verify(Request) ->
             end
     end.
 
+%% Where the token is looked for, cheapest first: the `x-csrf-token' header, the `_csrf'
+%% query parameter (what `weberl_form:open/3' puts in the action of a multipart form, so
+%% a forged upload is refused before its body is parsed), then the `_csrf' field of an
+%% urlencoded body. A multipart body is not parsed to look for it.
 submitted(Request) ->
     case weberl_request:header(Request, header_name()) of
-        {ok, Token} ->
-            {ok, Token};
-        error ->
+        {ok, Token} -> {ok, Token};
+        error -> query_token(Request)
+    end.
+
+query_token(Request) ->
+    case weberl_request:query_params(Request) of
+        {ok, Pairs} ->
+            case lists:keyfind(field_name(), 1, Pairs) of
+                {_, Token} when is_binary(Token) -> {ok, Token};
+                _ -> body_token(Request)
+            end;
+        {error, _} ->
+            body_token(Request)
+    end.
+
+body_token(Request) ->
+    case weberl_request:is_multipart(Request) of
+        true ->
+            error;
+        false ->
             case weberl_request:form(Request) of
                 {ok, Fields} ->
                     case lists:keyfind(field_name(), 1, Fields) of
                         {_, Token} when is_binary(Token) -> {ok, Token};
                         _ -> error
                     end;
+                {error, {limit_exceeded, _} = Limit} ->
+                    {limit, Limit};
                 {error, _} ->
                     error
             end
@@ -175,7 +203,9 @@ token(Request) ->
 %% @doc `protect(Request, fun(Token) -> Response end)': builds the response with the
 %% request's token and, when the browser does not have it yet, sets the cookie. The
 %% response is marked `cache-control: private, no-store' unless the handler set a
-%% `cache-control' itself, because it carries a per-browser token.
+%% `cache-control' itself, because it carries a per-browser token, and `referrer-policy:
+%% same-origin' unless the handler set one (the token of a multipart form is in the URL
+%% of its action, see {@link weberl_form:open/3}).
 -spec protect(weberl_request:t(), fun((binary()) -> weberl_response:t())) -> weberl_response:t().
 protect(Request, Build) when is_function(Build, 1) ->
     {Token, Known} = case current(Request) of
@@ -187,9 +217,15 @@ protect(Request, Build) when is_function(Build, 1) ->
                      true -> Response;
                      false -> weberl_response:set_cookie(Response, cookie_name(), Token, cookie_options())
                  end,
-    case weberl_response:header(WithCookie, <<"cache-control">>) of
-        error -> weberl_response:with_header(WithCookie, <<"cache-control">>, <<"private, no-store">>);
-        {ok, _} -> WithCookie
+    Cached = case weberl_response:header(WithCookie, <<"cache-control">>) of
+                 error -> weberl_response:with_header(WithCookie, <<"cache-control">>, <<"private, no-store">>);
+                 {ok, _} -> WithCookie
+             end,
+    %% a multipart form carries the token in its action URL: keep that URL out of the
+    %% Referer sent to other sites
+    case weberl_response:header(Cached, <<"referrer-policy">>) of
+        error -> weberl_response:with_header(Cached, <<"referrer-policy">>, <<"same-origin">>);
+        {ok, _} -> Cached
     end.
 
 %% Session cookie: the token lives as long as the browser session.

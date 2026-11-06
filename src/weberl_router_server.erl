@@ -93,10 +93,13 @@ start(Name, RouterConfig, ListenerConfig) ->
           fun(Listener) ->
             with(fun() -> weberl:build(Router) end,
               fun(Table) ->
-                with(fun() -> check_handlers(Table) end,
+                with(fun() -> weberl_limits:audit(Table) end,
                   fun(ok) ->
-                    with(fun() -> weberl_views:prepare(Router, Table) end,
-                      fun(ok) -> launch(Name, Listener, Table) end)
+                    with(fun() -> check_handlers(Table) end,
+                      fun(ok) ->
+                        with(fun() -> weberl_views:prepare(Router, Table) end,
+                          fun(ok) -> launch(Name, Listener, Table) end)
+                      end)
                   end)
               end)
           end)

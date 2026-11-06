@@ -19,7 +19,7 @@
 -export([new/3, html/2, text/2, binary/2,
          with_header/3, add_header/3, with_body/2, header/2, header_values/2,
          set_cookie/3, set_cookie/4, delete_cookie/2, delete_cookie/3,
-         redirect/1, redirect/2,
+         redirect/1, redirect/2, form_error/1,
          load_session/2, put_session/3, delete_session/2, set_session/2, reset_session/1,
          session_ttl/2, session/1, session_get/2, session_state/1, session_ttl/1,
          live/2, live/1,
@@ -97,6 +97,17 @@ delete_cookie(Response, Name) ->
 -spec delete_cookie(t(), iodata(), weberl_cookie:options()) -> t().
 delete_cookie(Response, Name, Opts) ->
     set_cookie(Response, Name, <<>>, Opts#{max_age => 0}).
+
+%% @doc The response for an error of `weberl_request:form/1,2', `multipart/1,2' or `files/1,2':
+%% `{limit_exceeded, _}' is `413 Payload Too Large', `unsupported_content_type' and
+%% `no_content_type' are `415 Unsupported Media Type', anything else (`malformed_multipart',
+%% a body the transport could not read) is `400 Bad Request'. A plain text body; build your
+%% own response when the form should be shown again.
+-spec form_error(term()) -> t().
+form_error({limit_exceeded, _}) -> text(413, <<"Payload Too Large">>);
+form_error(unsupported_content_type) -> text(415, <<"Unsupported Media Type">>);
+form_error(no_content_type) -> text(415, <<"Unsupported Media Type">>);
+form_error(_Other) -> text(400, <<"Bad Request">>).
 
 %% @doc A redirect with status `303 See Other', the right answer after a form POST
 %% (the browser follows with a GET). See {@link redirect/2}.

@@ -6,7 +6,7 @@
 %% '''
 -module(weberl_config).
 
--export([validate/1, filesystem/1, modules/1, layouts/1, root/1, prefix/1,
+-export([validate/1, filesystem/1, modules/1, layouts/1, limits/1, root/1, prefix/1,
          validate_listener/1, listener_adapter/1, listener_ip/1,
          listener_port/1, listener_options/1, listener_static/1]).
 
@@ -15,10 +15,13 @@
     prefix = "/" :: string()
 }.
 
+%% `limits': form limits for every route of the router (see `weberl_limits'; a route's own
+%% `limits' win over them).
 -record #router{
     filesystem = [] :: [filesystem_router],
     modules = [] :: [module()],
-    layouts = [] :: [string()]
+    layouts = [] :: [string()],
+    limits = #{} :: map()
 }.
 
 %% Transport listener. `adapter' is a module implementing `weberl_adapter';
@@ -43,15 +46,20 @@
 %% @doc Validate a `router' configuration. On success the returned record has
 %% normalized filesystem prefixes.
 -spec validate(term()) -> {ok, #router{}} | {error, term()}.
-validate(#router{filesystem = Fs, modules = Ms, layouts = Ls}) ->
-    case validate_filesystem(Fs, 1, []) of
-        {ok, Fs1} ->
-            case validate_modules(Ms, []) of
-                ok -> validate_layouts(Ls, Fs1, Ms);
-                {error, _} = Error -> Error
+validate(#router{filesystem = Fs, modules = Ms, layouts = Ls, limits = Limits}) ->
+    case weberl_limits:check(Limits) of
+        {ok, _} ->
+            case validate_filesystem(Fs, 1, []) of
+                {ok, Fs1} ->
+                    case validate_modules(Ms, []) of
+                        ok -> validate_layouts(Ls, Fs1, Ms, Limits);
+                        {error, _} = Error -> Error
+                    end;
+                {error, _} = Error ->
+                    Error
             end;
-        {error, _} = Error ->
-            Error
+        {error, Reason} ->
+            {error, {invalid_config, {limits, Reason}}}
     end;
 validate(Other) ->
     {error, {invalid_config, {not_a_router, Other}}}.
@@ -105,6 +113,10 @@ filesystem(#router{filesystem = F}) -> F.
 
 -spec modules(#router{}) -> [module()].
 modules(#router{modules = M}) -> M.
+
+%% @doc The form limits of the router (`#{}' when it sets none).
+-spec limits(#router{}) -> weberl_limits:limits().
+limits(#router{limits = L}) -> L.
 
 %% @doc Directories whose `.weberl' files are layouts (see `weberl_template_layout').
 -spec layouts(#router{}) -> [string()].
@@ -265,12 +277,12 @@ validate_filesystem([Other | _], I, _Acc) ->
 validate_filesystem(Other, _I, _Acc) ->
     {error, {invalid_config, {filesystem_not_a_list, Other}}}.
 
-validate_layouts(Ls, Fs, Ms) when is_list(Ls) ->
+validate_layouts(Ls, Fs, Ms, Limits) when is_list(Ls) ->
     case [L || L <- Ls, validate_root(L) =/= ok] of
-        [] -> {ok, #router{filesystem = Fs, modules = Ms, layouts = Ls}};
+        [] -> {ok, #router{filesystem = Fs, modules = Ms, layouts = Ls, limits = Limits}};
         [Bad | _] -> {error, {invalid_config, {layouts, {invalid_directory, Bad}}}}
     end;
-validate_layouts(Other, _Fs, _Ms) ->
+validate_layouts(Other, _Fs, _Ms, _Limits) ->
     {error, {invalid_config, {layouts_not_a_list, Other}}}.
 
 validate_root(Root) when is_list(Root), Root =/= [] ->

@@ -108,7 +108,9 @@ src/
 │   ├── weberl_dispatch.erl     request -> response (CSRF check, session loading and writing)
 │   ├── weberl_cookie.erl       validated Set-Cookie serializer
 │   ├── weberl_csrf.erl         Origin check, signed double-submit token
-│   ├── weberl_form.erl         form tag with the CSRF field
+│   ├── weberl_form.erl         form tag with the CSRF field (token in the action for multipart)
+│   ├── weberl_multipart.erl    multipart parts: Content-Disposition, limits, files, safe_filename
+│   ├── weberl_limits.erl       form limits: defaults, layers, validation, logging
 │   ├── weberl_session.erl      the encrypted session cookie
 │   ├── weberl_flash.erl        flash on top of the session
 │   ├── weberl_sign.erl         the signing/encryption key shared by tokens and sessions
@@ -173,6 +175,7 @@ Listener = #listener{adapter = weberl_roadrunner, ip = {127, 0, 0, 1}, port = 88
 | `router` | `filesystem` | `[]` | list of `filesystem_router` |
 | | `modules` | `[]` | declarative router modules |
 | | `layouts` | `[]` | directories of [layout](#layouts) templates |
+| | `limits` | `#{}` | [form limits](#forms-and-uploads) for every route of the router (a route's own `limits` win) |
 | `filesystem_router` | `root` | required | directory string |
 | | `prefix` | `"/"` | URL prefix for the whole root |
 | `listener` | `adapter` | `weberl_roadrunner` | module implementing `weberl_adapter` |
@@ -453,11 +456,13 @@ transport connection. There is no per-route process.
 | `meta/1` | transport metadata map (Roadrunner: `adapter`, `listener`, `scheme`, `version`, `request_id`) |
 | `read_body/1` | `{ok, binary()} \| {error, Reason}` |
 | `cookies/1`, `cookie/2` | `[{Name, Value}]` in wire order, values raw (not decoded); `cookie(Request, Name)` is `{ok, V} \| error` |
-| `form/1` | `application/x-www-form-urlencoded` body as `{ok, [{Name, Value \| true}]}` (decoded, repeats kept); `{error, unsupported_content_type \| no_content_type \| _}`. Multipart is not supported yet |
+| `form/1,2` | the text fields of a form body as `{ok, [{Name, Value \| true}]}` (decoded, repeats kept), for `application/x-www-form-urlencoded` and `multipart/form-data`; `{error, unsupported_content_type \| no_content_type \| {limit_exceeded, Limit} \| malformed_multipart \| _}` |
+| `multipart/1,2`, `files/1,2` | the parts and the files of a `multipart/form-data` body, see [Forms and uploads](#forms-and-uploads) |
+| `safe_filename/1` | a file name that is safe to store, from a client's |
 
-`cookies/1` and `form/1` are parsed by the adapter (callbacks of the `weberl_adapter` behaviour), so
-the transport's limits apply (`max_content_length`). A request not built by an adapter (a hand-made
-one in a test) raises `{no_adapter, cookies | form}`: give it `meta => #{adapter => Module}`.
+`cookies/1`, `form/1` and `multipart/1` are parsed by the adapter (callbacks of the `weberl_adapter`
+behaviour), so the transport's limits apply (`max_content_length`). A request not built by an adapter (a hand-made
+one in a test) raises `{no_adapter, cookies | form | multipart}`: give it `meta => #{adapter => Module}`.
 
 The body is read only when `read_body/1` is called. With the Roadrunner adapter it
 is already in memory (see [limitations](#known-limitations-and-future-work)).
@@ -525,8 +530,10 @@ an HTTPS listener it is HTTPS too) or be listed in the `csrf_origins` env (`[<<"
 for a proxy that rewrites `Host`). `Origin: null` is refused; no `Origin` passes (the token covers it).
 
 *Token* (signed double submit): a cookie holds a random nonce and its HMAC (key: `live_secret`), and the
-request must send the same value in the `_csrf` field of an urlencoded form or in the `x-csrf-token`
-header. The page that shows the form gets its token, and the cookie, from `weberl_csrf:protect/2`:
+request must send the same value in the `x-csrf-token` header, in the `_csrf` query parameter (the token of
+a [multipart form](#forms-and-uploads), so a forged upload is refused before its body is parsed), or in the
+`_csrf` field of an urlencoded form, looked at in that order. A multipart body is never parsed to look for
+the token. The page that shows the form gets its token, and the cookie, from `weberl_csrf:protect/2`:
 
 ```erlang
 handle(Request) ->
@@ -537,7 +544,8 @@ handle(Request) ->
 ```
 
 `protect/2` sets the cookie only when the browser has none, and adds `cache-control: private, no-store`
-(the page carries a per-browser token) unless the handler set one. In the template, `{{{ @form }}}`
+(the page carries a per-browser token) and `referrer-policy: same-origin` (the token of a multipart form is
+in a URL) unless the handler set them. In the template, `{{{ @form }}}`
 inserts the helper's HTML. `weberl_form:open(Token, Action[, Opts])` returns `<form method="post"
 action="...">` plus the hidden `_csrf` input; `#{csrf => false}` leaves the input out (and needs no
 token), `method => get` never carries one, `enctype` and `attrs` add attributes (escaped), and an
@@ -551,6 +559,77 @@ their own valid cookie and field.
 
 Not covered: forms are one helper for now (see "Forms" in `ROADMAP.md`); the live endpoints under
 `/_weberl/` have their own page tokens and Origin check (see [Credentials](#credentials)).
+
+### Forms and uploads
+
+A form with a file input needs `enctype="multipart/form-data"` (without it a browser sends the file's *name*,
+not its content). `weberl_form:open(Token, Action, #{enctype => multipart})` writes it, and puts the CSRF token
+in the **query string of the action** (`/up?_csrf=...`, or `&_csrf=` after an existing query) instead of a
+hidden field: a browser sends the URL before the body, so a forged upload is refused (`403`) before its body is
+parsed. The trade-off is that the token can appear in server logs and, without the header
+`protect/2` adds (`referrer-policy: same-origin`), in a `Referer`; it is used for multipart forms only, and
+`ROADMAP.md` notes the alternatives (a separate upload token, or body-only tokens with other guard rails).
+
+```erlang
+handle(Request) ->
+    case weberl_request:files(Request) of
+        {ok, [#{filename := Name, content_type := Type, body := Bytes, size := Size} | _]} ->
+            Safe = weberl_request:safe_filename(Name),     %% never build a path from the raw name
+            ok = file:write_file(filename:join("uploads", Safe), Bytes),
+            weberl_response:redirect("/done");
+        {ok, []} ->
+            weberl_response:text(400, <<"choose a file">>);
+        {error, Reason} ->
+            weberl_response:form_error(Reason)             %% 413 limit, 415 not multipart, 400 malformed
+    end.
+```
+
+- `multipart(Request)` is every part, in order: `#{name, filename, content_type, headers, body}`
+  (`filename` is `undefined` for a text field). `form(Request)` gives the parts without a file name as
+  `{Name, Value}`, so `_csrf` and ordinary fields work as for an urlencoded form. `files(Request)` gives
+  `#{name, filename, content_type, body, size}` for the parts with a file name, **leaving out a file input
+  that was left empty** (browsers send it as an empty part). A request that is not multipart is
+  `{error, unsupported_content_type}` for `multipart/1` and `files/1`, so a form that forgot its `enctype`
+  is an error and not silently "no files".
+- Everything a part says is the client's: `name`, `filename` and `content_type` are not checked against the
+  content. `safe_filename/1` returns the base name without path parts, control characters or leading dots
+  (nothing left is `<<"file">>`); choose the directory and make the name unique yourself. Text fields
+  must be UTF-8 (`malformed_multipart` otherwise), file bodies are raw bytes. In a `Content-Disposition`
+  `%22`, `%0D` and `%0A` are undone as browsers write them, and so are `\"` and `\\` as curl writes them.
+- The whole body is in memory (Roadrunner buffers it, up to the route's cap): large uploads need a
+  streaming transport, which is not available yet.
+
+**Limits** keep a form from exhausting memory. Six independent keys, with these defaults:
+
+| Limit | Default | Meaning |
+|---|---|---|
+| `max_fields` | 100 | text fields (urlencoded pairs, or multipart parts without a file name) |
+| `max_field_bytes` | 1 MiB | one text value |
+| `max_files` | 10 | file parts |
+| `max_file_bytes` | 5 MiB | one file |
+| `max_filename_bytes` | 255 | the client's file name |
+| `max_body_bytes` | the listener's `max_content_length` (Roadrunner: 10 MiB) | the whole body: files, fields and multipart framing |
+
+They are layered, the most specific winning, each key on its own: **per call**
+(`weberl_request:files(Request, #{max_file_bytes => 20_000_000})`), **route** (`{"/up", Handler, #{limits =>
+#{...}}}` or `-weberl_route(#{limits => #{max_file_bytes => 52428800}}).`, literal integers in the attribute),
+**router** (`#router{limits = #{...}}`), **global** (`application:set_env(weberl, form_limits, #{...})`) and the
+defaults above. `max_body_bytes` is enforced by the transport (Roadrunner's per-route `max_content_length`)
+before the body is read, so it is configuration only, not a per-call limit: an over-long declared body is
+answered `413` at once, a route can set it **higher** than the listener's (an upload route at 100 MiB while
+everything else stays at 10 MiB) or lower, and the router's value goes on every route that does not set its
+own. To allow bigger uploads on one route, set `max_body_bytes` and `max_file_bytes` on it together; a router
+start logs `form_limits_inconsistent` for a route whose body limit is under its file limit (such a file could
+never arrive).
+
+An exceeded limit is `{error, {limit_exceeded, Limit}}` and a warning in the log
+(`form_limit_exceeded`: the limit, what is allowed, what was seen, the path and the handler; never the
+content). `weberl_response:form_error(Reason)` turns the errors of these functions into responses: `413` for a
+limit, `415` for `unsupported_content_type` and `no_content_type`, `400` for anything else; when Weberl reads a
+urlencoded form itself (the CSRF token) and it is over a limit, it answers `413` on its own. A body refused by
+Roadrunner for its size never reaches Weberl, and Roadrunner reports it only as an event that its default handler
+drops: set `{roadrunner, [{event_handler, weberl_roadrunner_events}]}` to have it logged (`request_body_too_large`,
+with the listener and the client's address).
 
 ### Session
 
@@ -1024,9 +1103,9 @@ Erlang modules.
 ## Transport adapters and Roadrunner
 
 The listener's `adapter` names a module implementing `weberl_adapter`
-(`validate_options/1`, `start_listener/3`, `stop_listener/1`, `port/1`, and `cookies/1` and
-`form/1`, which parse a request's cookies and urlencoded form for `weberl_request:cookies/1` and
-`form/1`; optionally `validate_static/1`). Everything above the adapter is transport independent: an
+(`validate_options/1`, `start_listener/3`, `stop_listener/1`, `port/1`, and `cookies/1`,
+`form/1` and `multipart/1`, which parse a request's cookies, urlencoded form and the raw parts of a
+multipart body for `weberl_request:cookies/1`, `form/1` and `multipart/1`; optionally `validate_static/1`). Everything above the adapter is transport independent: an
 adapter only has to send repeated response headers (several `set-cookie`) as separate headers.
 
 `weberl_roadrunner` is included in weberl but optional. weberl compiles and starts
@@ -1040,7 +1119,8 @@ Static mounts are served by `roadrunner_static`; every other request goes to one
 shared Roadrunner handler that dispatches through the Weberl route table; route
 matching, normalization and 404s are Weberl's.
 
-`#listener{options = ...}` accepts only `max_content_length` (bytes),
+`#listener{options = ...}` accepts only `max_content_length` (bytes; the request body cap of every route that
+does not set its own `max_body_bytes`, see [Forms and uploads](#forms-and-uploads); 10 MiB by default),
 `request_timeout` (ms), `tls` (`ssl` server options) and `protocols` (Roadrunner's list:
 `http1`, `http2`, `http3`; HTTP/2 over TLS is negotiated by ALPN). Other keys are rejected
 at startup.
@@ -1453,8 +1533,9 @@ cleanly by stopping the application or terminating the router child
 
 See `ROADMAP.md` for the running list. Notable points:
 
-- Request bodies are fully buffered by Roadrunner (up to `max_content_length`,
-  10 MB by default) before the handler runs.
+- Request bodies are fully buffered by Roadrunner (up to `max_content_length`, 10 MiB by default, or a
+  route's own `max_body_bytes`) before the handler runs: uploads are in memory, and large ones need a
+  streaming transport.
 - Only ordinary HTTP/1.1 request/response is implemented. Streaming, SSE,
   WebSockets, HTTP/2 and HTTP/3 are not exposed.
 - Stopping a router does not close connections that are already open.

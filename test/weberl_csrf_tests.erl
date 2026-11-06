@@ -131,10 +131,21 @@ form_test_() ->
       ?_assertEqual(<<"<form method=\"get\" action=\"/search\">">>,
                     Open(<<"TOK">>, "/search", #{method => get}))},
      {"attributes are escaped and enctype goes after action",
-      ?_assertEqual(<<"<form method=\"post\" action=\"/up\" enctype=\"multipart/form-data\" "
+      ?_assertEqual(<<"<form method=\"post\" action=\"/up\" enctype=\"text/plain\" "
                       "class=\"a&quot;b\">", Input/binary>>,
-                    Open(<<"TOK">>, "/up", #{enctype => "multipart/form-data",
+                    Open(<<"TOK">>, "/up", #{enctype => "text/plain",
                                              attrs => [{"class", "a\"b"}]}))},
+     {"a multipart form carries its token in the action, not in a field",
+      [?_assertEqual(<<"<form method=\"post\" action=\"/up?_csrf=TOK\" enctype=\"multipart/form-data\">">>,
+                     Open(<<"TOK">>, "/up", #{enctype => multipart})),
+       ?_assertEqual(<<"<form method=\"post\" action=\"/up?_csrf=TOK\" enctype=\"multipart/form-data\">">>,
+                     Open(<<"TOK">>, "/up", #{enctype => "Multipart/Form-Data"})),
+       %% an action with a query keeps it; the token is encoded
+       ?_assertEqual(<<"<form method=\"post\" action=\"/up?kind=a&amp;_csrf=a.b%2Fc\" enctype=\"multipart/form-data\">">>,
+                     Open(<<"a.b/c">>, "/up?kind=a", #{enctype => multipart})),
+       %% csrf => false: no token anywhere
+       ?_assertEqual(<<"<form method=\"post\" action=\"/up\" enctype=\"multipart/form-data\">">>,
+                     Open(undefined, "/up", #{enctype => multipart, csrf => false}))]},
      {"the token is escaped",
       ?_assertEqual(<<"<input type=\"hidden\" name=\"_csrf\" value=\"a&quot;&gt;\">">>,
                     iolist_to_binary(weberl_form:csrf_input(<<"a\">">>)))},

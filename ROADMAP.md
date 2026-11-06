@@ -19,9 +19,18 @@ specification; kept here so they don't clutter active work.
   `two_way` page); reactive bindings on two-way pages (an input bound to a view assign, validation on
   the way); what a form does on a one-way page (no way back except HTTP requests); error and value
   re-display after a failed submit; CSRF on live requests (they have page tokens today, see README
-  "Credentials"). Also wanted: `weberl_request:multipart/1` through the adapter callback pattern (parts
-  `#{name, filename, content_type, body}`); today `form/1` refuses `multipart/form-data` and Roadrunner
-  buffers the whole body.
+  "Credentials"). Multipart is built (`weberl_request:multipart/1,2`, `files/1,2`, `form/1,2` on both
+  encodings, layered limits; HANDOFF decision 13). Still open: **streaming uploads** (Roadrunner buffers the
+  whole body; its `manual` body mode would let Weberl read in chunks, write a file part to disk as it arrives
+  and refuse early on a per-part limit), `filename*=` (RFC 5987) and per-part transfer encodings, and an
+  event handler that Weberl installs itself for the transport's body-size refusals
+  (`weberl_roadrunner_events` is opt-in because Roadrunner has one handler per node).
+- Multipart CSRF: the token for a multipart form is the ordinary one, in the action's query string (HANDOFF
+  decision 13), so a forged upload is rejected before the body is parsed. Revisit: either two tokens (a
+  file-upload token in the URL, named and prefixed so it is recognisable and valid only on upload routes, whose
+  decoded form says which form it was issued for, plus the general token in the body), or body-only tokens with
+  other guard rails (a lower body limit on upload routes until the token is checked, rate limits). A token in a
+  URL can end up in logs and Referer headers, and uploads are one of the easier ways to exhaust resources.
 - Once templates have conditionals and URL-safe interpolation (feedback items 2 and 3), a plain
   `<form>` with `{{ @csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
 

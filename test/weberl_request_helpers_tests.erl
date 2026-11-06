@@ -33,7 +33,7 @@ http_test_() ->
                fun() -> form_over_http(Name) end},
               {"a form and cookies in the same request", fun() -> login_post(Name) end},
               {"other content types are refused", fun() -> form_wrong_type(Name) end},
-              {"multipart is not supported yet", fun() -> form_multipart(Name) end},
+              {"a multipart body gives its text fields", fun() -> form_multipart(Name) end},
               {"a body over the limit is an error, not a crash", fun() -> form_too_big(Name) end}]
      end}.
 
@@ -115,7 +115,7 @@ form_wrong_type(Name) ->
 form_multipart(Name) ->
     Body = <<"--B\r\ncontent-disposition: form-data; name=\"a\"\r\n\r\n1\r\n--B--\r\n">>,
     {200, Out} = post(Name, "/form", [], "multipart/form-data; boundary=B", Body),
-    ?assertEqual(<<"{error,unsupported_content_type}">>, Out).
+    ?assertEqual(<<"{ok,[{<<\"a\">>,<<\"1\">>}]}">>, Out).
 
 form_too_big(Name) ->
     Big = binary:copy(<<"a=1&">>, 100),

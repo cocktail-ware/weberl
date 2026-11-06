@@ -24,8 +24,9 @@
 
 -export([new/1,
          method/1, path/1, headers/1, header/2, query/1, query_params/1,
-         params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1, session/1, session_get/2,
-         page/1, with_page/2, with_params/2]).
+         params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1, form/2, multipart/1, multipart/2,
+         files/1, files/2, is_multipart/1, safe_filename/1, session/1, session_get/2,
+         page/1, with_page/2, with_params/2, route/1, limits/1, with_route/2]).
 -export_type([t/0]).
 -export_record([request]).
 
@@ -39,7 +40,10 @@
     peer = undefined :: undefined | {inet:ip_address(), inet:port_number()},
     meta = #{} :: map(),
     %% Live page id, set by dispatch for `one_way' / `two_way' routes.
-    page = undefined :: undefined | binary()
+    page = undefined :: undefined | binary(),
+    %% What dispatch knows of the route that matched: `handler' and the `limits' in force
+    %% for it (route over router), see `weberl_limits'. Empty for a hand-made request.
+    route = #{} :: #{handler => module(), limits => weberl_limits:limits()}
 }.
 
 -type t() :: #request{}.
@@ -135,16 +139,127 @@ session(#request{} = R) ->
 session_get(#request{} = R, Key) ->
     maps:find(Key, session(R)).
 
-%% @doc The body of an `application/x-www-form-urlencoded' request as
-%% `[{Name, Value | true}]' (binaries; `+' and percent escapes decoded; a field
-%% without `=' is `true'; names may repeat, in order). Any other content type is
-%% `{error, unsupported_content_type}' (`multipart/form-data' too, for now) and a
-%% missing one `{error, no_content_type}'. The adapter reads the body, so its
-%% size limit applies (`max_content_length' for Roadrunner). Raises
-%% `{no_adapter, form}' for a request that was not built by an adapter.
+%% @doc The text fields of a form body as `[{Name, Value | true}]' (binaries, names may
+%% repeat, in order). For `application/x-www-form-urlencoded' `+' and percent escapes are
+%% decoded and a field without `=' is `true'; for `multipart/form-data' these are the parts
+%% without a file name (the files are {@link files/1}). Another content type is `{error,
+%% unsupported_content_type}' and a missing one `{error, no_content_type}'. The
+%% {@link weberl_limits} apply (`{error, {limit_exceeded, Limit}}', logged); the adapter
+%% reads the body, so the transport's size limit applies first. Raises `{no_adapter, form}'
+%% for a request that was not built by an adapter.
 -spec form(t()) -> {ok, [{binary(), binary() | true}]} | {error, term()}.
 form(#request{} = R) ->
-    (adapter(R, form)):form(R).
+    form(R, #{}).
+
+%% @doc Like {@link form/1} with limits for this call (see {@link weberl_limits}).
+-spec form(t(), weberl_limits:limits()) -> {ok, [{binary(), binary() | true}]} | {error, term()}.
+form(#request{} = R, Call) ->
+    Limits = call_limits(R, Call),
+    case multipart_type(R) of
+        true ->
+            case parts(R, Limits) of
+                {ok, Parts} -> {ok, weberl_multipart:fields(Parts)};
+                {error, _} = Error -> Error
+            end;
+        false ->
+            case (adapter(R, form)):form(R) of
+                {ok, Pairs} -> urlencoded_within(Pairs, Limits, R);
+                {error, _} = Error -> Error
+            end
+    end.
+
+%% The fields of an urlencoded body against the limits.
+urlencoded_within(Pairs, Limits, R) ->
+    #{max_fields := MaxFields, max_field_bytes := MaxBytes} = Limits,
+    Biggest = lists:max([0 | [value_size(V) || {_, V} <- Pairs]]),
+    if
+        length(Pairs) > MaxFields -> weberl_limits:exceeded(max_fields, MaxFields, length(Pairs), R);
+        Biggest > MaxBytes -> weberl_limits:exceeded(max_field_bytes, MaxBytes, Biggest, R);
+        true -> {ok, Pairs}
+    end.
+
+value_size(true) -> 0;
+value_size(V) -> byte_size(V).
+
+%% @doc The parts of a `multipart/form-data' body, in order, each `#{name, filename,
+%% content_type, headers, body}' (`filename' is `undefined' for a text field and `<<>>' for a
+%% file input left empty). See `weberl_multipart' for what is and is not checked: names, file
+%% names and content types are the client's. Errors: `{error, unsupported_content_type}' (not a
+%% multipart request), `malformed_multipart', `{error, {limit_exceeded, Limit}}' and the
+%% transport's.
+-spec multipart(t()) -> {ok, [weberl_multipart:part()]} | {error, term()}.
+multipart(#request{} = R) ->
+    multipart(R, #{}).
+
+%% @doc Like {@link multipart/1} with limits for this call (see {@link weberl_limits}).
+-spec multipart(t(), weberl_limits:limits()) -> {ok, [weberl_multipart:part()]} | {error, term()}.
+multipart(#request{} = R, Call) ->
+    parts(R, call_limits(R, Call)).
+
+%% @doc The files of a `multipart/form-data' body: `[#{name, filename, content_type, body,
+%% size}]' for the parts that have a file name, leaving out a file input that was left empty.
+%% A request that is not multipart is `{error, unsupported_content_type}': a form with a file
+%% input needs `enctype="multipart/form-data"', see `weberl_form:open/3'.
+-spec files(t()) -> {ok, [map()]} | {error, term()}.
+files(#request{} = R) ->
+    files(R, #{}).
+
+%% @doc Like {@link files/1} with limits for this call (see {@link weberl_limits}).
+-spec files(t(), weberl_limits:limits()) -> {ok, [map()]} | {error, term()}.
+files(#request{} = R, Call) ->
+    case parts(R, call_limits(R, Call)) of
+        {ok, Parts} -> {ok, weberl_multipart:files(Parts)};
+        {error, _} = Error -> Error
+    end.
+
+%% @doc A file name that is safe to store, made from a client's (see `weberl_multipart').
+-spec safe_filename(binary()) -> binary().
+safe_filename(Name) -> weberl_multipart:safe_filename(Name).
+
+parts(R, Limits) ->
+    case multipart_type(R) of
+        true ->
+            case (adapter(R, multipart)):multipart(R) of
+                {ok, Raw} -> weberl_multipart:parts(Raw, Limits, R);
+                {error, _} = Error -> Error
+            end;
+        false ->
+            {error, unsupported_content_type}
+    end.
+
+%% Limits for a call: the defaults, env, route and the call's own (`max_body_bytes' is not a
+%% per call limit).
+call_limits(R, Call) ->
+    case weberl_limits:check_call(Call) of
+        {ok, Checked} -> weberl_limits:effective(R, Checked);
+        {error, Reason} -> erlang:error({badarg, Reason})
+    end.
+
+%% @doc Is the body `multipart/form-data' (by the `Content-Type' header)?
+-spec is_multipart(t()) -> boolean().
+is_multipart(#request{} = R) -> multipart_type(R).
+
+multipart_type(R) ->
+    case header(R, <<"content-type">>) of
+        {ok, Type} ->
+            [Main | _] = binary:split(Type, <<";">>),
+            string:lowercase(string:trim(Main)) =:= <<"multipart/form-data">>;
+        error ->
+            false
+    end.
+
+%% @doc What dispatch knows of the matched route: `#{handler, limits}' (`#{}' for a request
+%% that did not come through dispatch).
+-spec route(t()) -> map().
+route(#request{route = Route}) -> Route.
+
+%% @doc The form limits dispatch resolved for the route (route over router), `#{}' when none.
+-spec limits(t()) -> weberl_limits:limits().
+limits(#request{route = Route}) -> maps:get(limits, Route, #{}).
+
+%% @doc The request with the route information dispatch sets (`handler', `limits').
+-spec with_route(t(), map()) -> t().
+with_route(#request{} = R, Route) when is_map(Route) -> R#request{route = Route}.
 
 %% @doc The live page id when the route is `one_way' / `two_way', else
 %% `undefined'. Pass it to whatever pushes updates with `weberl_live:push/3'.

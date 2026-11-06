@@ -5,6 +5,7 @@
 -module(weberl_route).
 
 -export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1, csrf/1, layout/1,
+         limits/1,
          normalize_path/1, check_opts/1, check_live/1,
          normalize_pattern/1, pattern_parts/1, is_dynamic/1, shape/1, request_segments/1, decode_segment/1]).
 -export_type([t/0, origin/0, path/0, live/0, opts/0]).
@@ -19,7 +20,7 @@
 %% (no process per page; it only receives the topics of its handler, see
 %% `weberl_live'); default `true'.
 -type opts() :: #{live => live(), session => boolean(), csrf => true | origin | false,
-                  layout => atom()}.
+                  layout => atom(), limits => weberl_limits:limits()}.
 
 -record #route{
     path    :: path(),
@@ -85,13 +86,19 @@ layout(#route{opts = O}) ->
 -spec csrf(t()) -> weberl_csrf:mode().
 csrf(#route{opts = O}) -> maps:get(csrf, O, true).
 
-%% @doc Validate a route options map. The keys are `live', `session', `csrf' and
-%% `layout' (an atom); a session-less page has to be live.
+%% @doc The form limits the route sets itself (`limits => #{...}'), `#{}' when none.
+-spec limits(t()) -> weberl_limits:limits().
+limits(#route{opts = O}) -> maps:get(limits, O, #{}).
+
+%% @doc Validate a route options map. The keys are `live', `session', `csrf',
+%% `layout' (an atom) and `limits' (a map, see `weberl_limits'); a session-less page has to
+%% be live.
 -spec check_opts(term()) -> {ok, opts()} | {error, term()}.
 check_opts(Opts) when is_map(Opts) ->
-    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf, K =/= layout] of
+    case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf, K =/= layout, K =/= limits] of
         [] ->
-            Checks = [check_kind(Opts), check_session(Opts), check_csrf(Opts), check_layout(Opts)],
+            Checks = [check_kind(Opts), check_session(Opts), check_csrf(Opts), check_layout(Opts),
+                      check_limits(Opts)],
             case [E || {error, _} = E <- Checks] of
                 [] -> {ok, Opts};
                 [Error | _] -> Error
@@ -106,6 +113,16 @@ check_kind(Opts) ->
     case maps:find(live, Opts) of
         error -> ok;
         {ok, Kind} -> check_live(Kind)
+    end.
+
+check_limits(Opts) ->
+    case maps:find(limits, Opts) of
+        error -> ok;
+        {ok, Limits} ->
+            case weberl_limits:check(Limits) of
+                {ok, _} -> ok;
+                {error, Reason} -> {error, {invalid_limits, Reason}}
+            end
     end.
 
 check_layout(Opts) ->

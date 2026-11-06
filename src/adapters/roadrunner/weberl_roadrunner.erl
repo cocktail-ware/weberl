@@ -22,14 +22,15 @@
 %% Anything else is rejected.
 %%
 %% == Limitations ==
-%% Roadrunner buffers the whole request body (up to `max_content_length', 10 MB
-%% by default) before calling the handler, so `weberl_request:read_body/1'
+%% Roadrunner buffers the whole request body (up to `max_content_length', 10 MiB
+%% by default, or the route's own `max_body_bytes', see `weberl_limits') before
+%% calling the handler, so `weberl_request:read_body/1'
 %% returns data that is already in memory. Only buffered responses are produced.
 -module(weberl_roadrunner).
 -behaviour(weberl_adapter).
 
 -export([validate_options/1, validate_static/1, start_listener/3,
-         stop_listener/1, port/1, cookies/1, form/1]).
+         stop_listener/1, port/1, cookies/1, form/1, multipart/1]).
 
 -define(ALLOWED, [max_content_length, request_timeout, tls, protocols]).
 -define(STATIC_ALLOWED, [cache_control, symlink_policy, cache_ttl_ms]).
@@ -99,13 +100,24 @@ port(Name) -> roadrunner_listener:port(Name).
 cookies(Request) ->
     roadrunner_req:parse_cookies(raw(Request)).
 
-%% Only urlencoded forms: multipart is not supported by `weberl_request:form/1'
-%% yet, so it is an error here rather than a list of parts nobody expects.
+%% Only urlencoded forms: a multipart body is `multipart/1' (`weberl_request:form/1' sends it
+%% there), so it is an error here rather than a list of parts nobody expects.
 -spec form(weberl_request:t()) -> {ok, [{binary(), binary() | true}]} | {error, term()}.
 form(Request) ->
     case roadrunner_req:read_form(raw(Request)) of
         {ok, urlencoded, Pairs, _Req} -> {ok, Pairs};
         {ok, multipart, _Parts, _Req} -> {error, unsupported_content_type};
+        {error, _} = Error -> Error
+    end.
+
+%% The raw parts of a `multipart/form-data' body (buffered by Roadrunner, up to the route's
+%% `max_content_length'; the parser is Roadrunner's).
+-spec multipart(weberl_request:t()) -> {ok, [{[{binary(), binary()}], binary()}]} | {error, term()}.
+multipart(Request) ->
+    case roadrunner_req:read_form(raw(Request)) of
+        {ok, multipart, Parts, _Req} -> {ok, [{Headers, Body} || #{headers := Headers, body := Body} <- Parts]};
+        {ok, urlencoded, _Pairs, _Req} -> {error, unsupported_content_type};
+        {error, no_boundary} -> {error, malformed_multipart};
         {error, _} = Error -> Error
     end.
 
@@ -130,7 +142,33 @@ listener_opts(Listener, Table) ->
 %% through the Weberl table (a trailing `*' also matches the root path).
 routes(Listener, Table) ->
     Static = [static_route(M) || M <- weberl_config:listener_static(Listener)],
-    Static ++ internal_routes() ++ [{~"/*path", weberl_roadrunner_handler, Table}].
+    Static ++ internal_routes() ++ body_capped_routes(Table) ++ [catch_all(Table)].
+
+%% The request body cap (`max_body_bytes', see `weberl_limits') is Roadrunner's `max_content_length'
+%% of a route, enforced before the body is read (a `413' for a declared length over it). The router's
+%% own value (else the application env's) goes on the catch-all; a Weberl route that sets one gets a
+%% route of its own before it, the more specific patterns first (a static segment before a
+%% parameter) so that none is shadowed. Everything else keeps the listener's `max_content_length'.
+catch_all(Table) ->
+    Dispatch = {~"/*path", weberl_roadrunner_handler, Table},
+    Env = case weberl_limits:check_env() of {ok, L} -> L; {error, _} -> #{} end,
+    case maps:find(max_body_bytes, maps:merge(Env, weberl_table:limits(Table))) of
+        {ok, Max} -> #{path => ~"/*path", handler => weberl_roadrunner_handler, state => Table,
+                       max_content_length => Max};
+        error -> Dispatch
+    end.
+
+body_capped_routes(Table) ->
+    Capped = [{R, Max} || R <- weberl_table:routes(Table),
+                          {ok, Max} <- [maps:find(max_body_bytes, weberl_route:limits(R))]],
+    [#{path => unicode:characters_to_binary(weberl_route:path(R)), handler => weberl_roadrunner_handler,
+       state => Table, max_content_length => Max}
+     || {R, Max} <- lists:sort(fun({A, _}, {B, _}) -> specificity(A) =< specificity(B) end, Capped)].
+
+%% Sorts a static segment before a parameter at the first segment where two patterns differ.
+specificity(Route) ->
+    [case Part of {param, _} -> {1, <<>>}; Static -> {0, Static} end
+     || Part <- weberl_route:pattern_parts(weberl_route:path(Route))].
 
 internal_routes() ->
     [{~"/_weberl/client.js", roadrunner_static,

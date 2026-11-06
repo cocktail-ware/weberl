@@ -381,6 +381,61 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   "Route parameters" written; ROADMAP keeps wildcards, the named link form, typed parameters and links by
   route name. Next in the user's order: multipart forms, then blocks inside tags and attributes, then runtime
   layouts.
+- **Decision 13 (multipart forms; user, 2026-11-06; limits defaults still to confirm).** API: a new required
+  adapter callback `multipart/1` returning the raw parts `[{Headers, Body}]` (Roadrunner: a wrapper of
+  `roadrunner_multipart`, which does not parse `Content-Disposition`); an adapter-independent `weberl_multipart`
+  parses the disposition. `weberl_request:multipart/1` gives every part in order as `#{name, filename,
+  content_type, headers, body}` (`filename` is `undefined` for a text field); `weberl_request:form/1` now works
+  for both encodings (multipart: the parts without a filename, as `{Name, Value}`; values must be UTF-8) so the
+  `_csrf` field and ordinary fields work as before; `weberl_request:files/1` gives the parts with a filename
+  (`#{name, filename, content_type, body, size}`; an empty file input, a part with `filename=""` and no body,
+  is omitted); `weberl_request:safe_filename/1` returns a plain base name (no path parts, control characters or
+  leading dots); the raw `filename` and `content_type` are the client's claims and the docs say so. A part
+  without a `name` is `malformed_multipart`. Errors are returned: `{error, {limit_exceeded, Limit}}`,
+  `malformed_multipart`, `unsupported_content_type`; `weberl_response:form_error(Reason)` maps them to 413,
+  400 and 415 for handlers; when Weberl parses itself (the CSRF check) it answers 413 itself. Limits are layered
+  and independent, most specific wins: per call (`multipart(Request, Limits)`), route option `limits`, router
+  config, application env `form_limits`, built-in defaults; keys `max_fields`, `max_field_bytes`, `max_files`,
+  `max_file_bytes`, `max_filename_bytes`, `max_body_bytes`; every exceeded limit logs a warning (limit,
+  allowed, seen, path, handler; never content). CSRF on multipart: **the basic token goes in the action's query
+  string** (`weberl_form:open(Action, #{enctype => multipart})` writes `enctype="multipart/form-data"` and
+  appends `?_csrf=TOKEN`, merging with an existing query), checked in the order `x-csrf-token` header, `_csrf`
+  query parameter, `_csrf` body field, after the Origin check and before the body is parsed; used for multipart
+  forms only; responses with such a form carry `Referrer-Policy: same-origin`. The user rejected the
+  token-in-the-form alternatives (rendered by the server, no JavaScript hijacking). **Noted for later
+  (ROADMAP)**: a file-upload-specific token (a distinct name and prefix, e.g. `filecsrf`, valid only on upload
+  routes, with a second general token in the body) or body-only tokens with other guard rails, because a token in
+  a URL can reach logs and Referer headers and uploads are an easy way to exhaust resources.
+- **Multipart built (2026-11-06, decision 13; limits defaults confirmed by the user).** Defaults:
+  `max_fields` 100, `max_field_bytes` 1 MiB, `max_files` 10, `max_file_bytes` 5 MiB (lowered from the proposed
+  10 MiB: a file at the listener's cap cannot arrive with its framing), `max_filename_bytes` 255,
+  `max_body_bytes` unset (the transport's). Roadrunner's `max_content_length` defaults to 10,485,760 bytes (10
+  MiB; the old docs said 10 MB) and **can be set per route, larger or smaller than the listener's, and is enforced
+  before the body is read** (a 413 for a declared length over it): so `max_body_bytes` is configuration only (not a
+  per-call limit); the router's (else the env's) value goes on the Roadrunner catch-all, a route that sets its own
+  gets a dedicated Roadrunner route before it (statics before parameters, so none is shadowed). Built:
+  `weberl_limits` (defaults, layers env < router < route < call, `check/1`, `check_call/1`, `audit/1` called at router
+  start, `exceeded/4` logs `form_limit_exceeded`), `weberl_multipart` (disposition parsing, parts, `fields/1`,
+  `files/1`, `safe_filename/1`), the required adapter callback `multipart/1` (Roadrunner wraps
+  `roadrunner_multipart` through `read_form`), `weberl_request:form/2, multipart/1,2, files/1,2, is_multipart/1,
+  safe_filename/1, route/1, limits/1, with_route/2` (new request field `route`: handler and the limits dispatch
+  resolved), route option and `-weberl_route` attribute `limits` (literal integers only), `#router{limits}`,
+  `weberl_table:with_limits/2, limits/1`, `weberl_response:form_error/1` (413, 415, 400), `weberl_form:open/3`
+  with `enctype => multipart` (token in the action's query string), `weberl_csrf` (order header, query, urlencoded
+  body; **a multipart body is never parsed for the token**: stricter than the wording of the decision, chosen so a
+  forged upload costs nothing; `{limit_exceeded, _}` from the urlencoded read is a 413 in dispatch),
+  `weberl_csrf:protect/2` adds `referrer-policy: same-origin`, `weberl_roadrunner_events` (opt-in event handler
+  logging `request_body_too_large`: Roadrunner reports the refusal only as an event and its default handler drops it).
+  Decisions made while building: `\"` and `\\` are undone in a quoted disposition value (curl) but any other backslash
+  stays (browsers do not escape it, so `C:\dir\x.txt` survives); `%22 %0D %0A` are undone (browsers), no other `%`;
+  an empty file input (`filename=""`, no content) is omitted from `files/1` and `form/1` and counts for no limit;
+  `files/1` and `multipart/1` on a non-multipart request are `{error, unsupported_content_type}` (a form that
+  forgot its `enctype` is an error, not "no files"). A bug found by the tests: `weberl_limits:audit/1` merged its
+  layers the wrong way round. Tests: `weberl_multipart_tests` (36), `weberl_upload_tests` (12, over Roadrunner:
+  uploads, caps lower and higher than the listener's, early 413 on a declared length, the CSRF flow with a real
+  cookie, the event handler), `weberl_csrf_tests` and `weberl_request_helpers_tests` updated; 998 eunit tests;
+  browser suite not re-run. README "Forms and uploads" written. Next in the user's order: blocks inside tags and
+  attributes, then runtime layouts.
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)
