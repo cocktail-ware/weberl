@@ -70,10 +70,12 @@ walk([{expr, Line, escaped, Parsed} | Rest], {{value, _, Tag, Attr} = Ctx, Val},
 walk([{expr, _, _, _} = Node | Rest], {Ctx, Val}, Env) ->
     {Rest2, State} = walk(Rest, {Ctx, bump(Val)}, Env),
     {[Node | Rest2], State};
-walk([Node | Rest], State, Env) ->
-    %% a region, block, slot or fill: it stands in text, and each of its children starts in text
+walk([Node | Rest], {Ctx, _} = State, Env) ->
+    %% a region, block, slot or fill: each of its children starts in the context the node stands in
+    %% (text, or between attributes for a block in a tag; the value of an attribute that takes a URL
+    %% has no blocks)
     Node2 = weberl_template_parser:map_children(
-              fun(Children) -> {Children2, _} = walk(Children, {text, none}, Env), Children2 end, Node),
+              fun(Children) -> {Children2, _} = walk(Children, {Ctx, none}, Env), Children2 end, Node),
     {Rest2, State2} = walk(Rest, State, Env),
     {[Node2 | Rest2], State2}.
 

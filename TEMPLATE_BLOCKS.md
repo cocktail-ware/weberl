@@ -92,7 +92,7 @@ missing guard assign raises even when an earlier clause would have matched.
 |---|---|
 | `assign(Name, Anno) -> Form` and `local(Name) -> Name'` for `weberl_blocks_expr:render/2` | `weberl_template_runtime:assign/3`; `W_` prefix |
 | Value rendering of an interpolation | binaries, character lists, integers, floats, atoms; HTML escaping |
-| Context rules (where a block or interpolation may stand) | `weberl_template_html`: text and quoted attribute values only |
+| Context rules (where a block or interpolation may stand) | `weberl_template_html`: interpolation in text and quoted attribute values; blocks in text, between attributes and in plain quoted values |
 | Delimiters | `{{ }}`, `{: :}` |
 | Weberl-only constructs | regions, slots, fills, `{: content :}`, layouts, live updates |
 
@@ -104,7 +104,9 @@ missing guard assign raises even when an earlier clause would have matched.
 * An assign inside a guard that is not a `case` clause (for example a `fun` with a guard inside an expression)
   hits Erlang's guard rules; the compile error is Erlang's (`illegal_guard_expr`).
 * A map generator iterates in Erlang's map order.
-* Blocks stand only in HTML text in Weberl (extension to tags and attributes: `ROADMAP.md`).
+* Blocks stand in HTML text, between the attributes of a start tag and inside the quoted value of an attribute
+  that takes plain text (README, "Conditional attributes"); not inside URL or restricted attribute values,
+  `<script>`, `<style>`, comments or names.
 * Expressions run on every render and region re-render: they are developer code and have to be pure and cheap.
   An expression that raises propagates from `render/2`; `try_render/2` and `try_render_region/3` (what a live
   page uses) return `{error, {render_failed, Class, Reason}}`.

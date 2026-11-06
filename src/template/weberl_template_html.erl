@@ -14,7 +14,7 @@
 %% </ul>
 -module(weberl_template_html).
 
--export([initial/0, advance/2, check/2, url_attribute/1, url_policy/2]).
+-export([initial/0, advance/2, check/2, url_attribute/1, url_policy/2, block_context/1, branch_end_ok/2]).
 -export_type([ctx/0, policy/0]).
 
 %% What a URL attribute of an element accepts (HANDOFF decision 8): `web' a path on
@@ -68,6 +68,37 @@ restricted(Attr) ->
     lists:member(Attr, [<<"style">>, <<"srcset">>, <<"data">>,
                         <<"background">>, <<"ping">>, <<"manifest">>, <<"codebase">>,
                         <<"longdesc">>, <<"usemap">>, <<"srcdoc">>, <<"is">>]).
+
+%% @doc Where may a block (`if', `case', `for') stand in this context? `text'; `tag', between the
+%% attributes of a start tag (the engine adds the separating spaces, see `weberl_template_attrs');
+%% `value', inside the quoted value of an attribute that takes plain text. The value of a URL attribute
+%% or of a restricted one (`style', `on*', ...) is `{error, {block_in_restricted_attribute, Attr}}';
+%% everything else is `unsupported'.
+-spec block_context(ctx()) -> text | tag | value | unsupported | {error, term()}.
+block_context(text) -> text;
+block_context({in_tag, _}) -> tag;
+%% after a finished attribute name and white space (`<input disabled {: if ... :}'): the next thing is a
+%% new attribute
+block_context({after_attr_name, _, _}) -> tag;
+block_context({value, _, _, Attr}) ->
+    case restricted(Attr) orelse url_attribute(Attr) of
+        true -> {error, {block_in_restricted_attribute, Attr}};
+        false -> value
+    end;
+block_context(_) -> unsupported.
+
+%% @doc May a branch that started in context `Start' end in `End'? In text and in a value it has to be the
+%% same context. Between attributes the branch is followed by a space the engine adds, so it may end between
+%% attributes or after a complete attribute name (`checked'), but not inside a value, after `=' or in the
+%% middle of a name that is not finished by a space.
+-spec branch_end_ok(ctx(), ctx()) -> boolean().
+branch_end_ok({after_attr_name, Tag, _}, End) -> branch_end_ok({in_tag, Tag}, End);
+branch_end_ok({in_tag, Tag}, {in_tag, Tag}) -> true;
+branch_end_ok({in_tag, Tag}, {attr_name, Tag, _}) -> true;
+branch_end_ok({in_tag, Tag}, {after_attr_name, Tag, _}) -> true;
+branch_end_ok({in_tag, _}, _) -> false;
+branch_end_ok(Same, Same) -> true;
+branch_end_ok(_, _) -> false.
 
 %% @doc Attributes whose value is a URL: interpolation there has to be a `weberl_url'
 %% value (see `weberl_template_urls').

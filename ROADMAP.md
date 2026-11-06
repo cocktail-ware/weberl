@@ -35,17 +35,15 @@ specification; kept here so they don't clutter active work.
   `<form>` with `{{ @csrf_token }}` replaces the Erlang-built `{{{ }}}` form tag.
 
 ## Template blocks inside tags and attributes
-- `{: if :}`, `{: case :}` and `{: for :}` (see HANDOFF "2") first stand only in HTML text. To extend, as a
-  design of its own:
-  - conditional **attributes**: boolean ones (`checked`, `disabled`, `selected`, `hidden`) and optional
-    values, for example `<input {: if @on :}checked{: /if :}>` or an attribute with a computed value;
-  - **class lists** and similar token lists (`class="{: for ... :}"`), where whitespace between tokens
-    matters and a naive block leaves stray spaces;
-  - conditionals **inside a start tag** in general (the HTML context after a branch must be the same as
-    before it, which the tracker can check in `in_tag` just as it does in text) and inside **quoted
-    attribute values**, with the escaping rules that go with each position;
-  - what stays refused: `<script>`, `<style>` and event-handler attributes (they need context-specific
-    encoding, as for interpolation today), and URL attributes until the safe-URL design (feedback item 3).
+- Built (HANDOFF decision 14): blocks between the attributes of a start tag (Weberl adds the separating
+  spaces) and inside the quoted value of a plain attribute (nothing added). Still open:
+  - blocks inside the **value of a URL attribute**, which needs the position of a part (whole URL or piece)
+    to survive a branch, and inside `style` and `on*` values, which need context-specific encoding;
+  - **token-list attributes** (`class`, `rel`, ...) could get the same automatic spacing as attributes, since
+    HTML ignores repeated white space there; today the author writes the spaces;
+  - boolean attribute sugar (`checked={{ @on }}`);
+  - the user plans a **different HTML parsing system** (the tracker is a minimal tokenizer, not a parser);
+    unquoted attribute values and the like wait for it.
 - Whitespace control for block tags (trimming a block tag that stands alone on its line, trimming around
   a tag) as a small additive marker; today output is literal and nothing is trimmed.
 

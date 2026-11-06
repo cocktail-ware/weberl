@@ -121,6 +121,7 @@ src/
 │   ├── weberl_template_parser.erl      parse (blocks, scope) + validate
 │   ├── weberl_template_html.erl        HTML context tracking, URL attributes and their policy
 │   ├── weberl_template_urls.erl        links in URL attributes: checks, route verification, placeholders
+│   ├── weberl_template_attrs.erl       blocks between attributes: the separating spaces
 │   ├── weberl_template_layout.erl      layouts: content, slots, fills
 │   ├── weberl_template_compiler.erl    AST -> generated module
 │   ├── weberl_template_runtime.erl     assign lookup, value conversion, escaping, URL attribute check
@@ -902,10 +903,14 @@ Blocks take Erlang: conditions, patterns and generators are Erlang expressions, 
 - **Scope**: names bound by a pattern or generator exist only in their branch or body. Binding a name that is
   already bound is an error (`{rebound_variable, Name}`); siblings may reuse a name; using an unbound one is
   `{unbound_variable, Name}`. Capitalized names in `{{ Name }}` read these variables.
-- **Where they may stand**: only in HTML text (not in a tag, an attribute value, `<script>`, `<style>` or a
-  comment: `{block_in_unsupported_context, Kind, Where}`); every branch and body has to end in text, so a tag
-  cannot stay open across a branch (`{block_unbalanced_markup, Kind}`). Elements themselves are not matched
-  across branches, as in a region: keep them balanced. Blocks nest, and may contain regions.
+- **Where they may stand**: in HTML text, **between the attributes of a start tag**, and **inside the quoted
+  value of an attribute that takes plain text** (not in `<script>`, `<style>`, a comment, a tag or attribute
+  name or an unquoted value: `{block_in_unsupported_context, Kind, Where}`; not in the value of a URL
+  attribute or of `style`, `on*`, `srcset`... : `{block_in_restricted_attribute, Attr}`). Every branch and body is
+  read from the place where the block stands and has to end there, so a tag or a quote cannot stay open
+  across a branch (`{block_unbalanced_markup, Kind}`). Elements themselves are not matched across branches, as
+  in a region: keep them balanced. Blocks nest; in text they may contain regions (not in a tag or a value).
+- **Attributes**: see [below](#conditional-attributes).
 - **Regions and blocks**: a region may stand in a branch, and may contain blocks; its variables are the
   assigns they read. `render_region/3` renders only the region's content, not the surrounding condition, so
   **a conditional is only live inside a region**: wrap it (`{: region nav :}{: if ... :}...{: /region nav :}`)
@@ -923,6 +928,34 @@ Blocks take Erlang: conditions, patterns and generators are Erlang expressions, 
   their block, twice, or after `else`), `case_without_of`, `{missing_expression, Kind}`.
 
 Expressions are developer code, run on every render and region re-render: keep them pure and cheap.
+
+#### Conditional attributes
+
+An optional attribute no longer needs the element written twice:
+
+```html
+<input name="agent" {: if @on :}checked{: /if :}>                     <!-- between attributes -->
+<a {: if @user :}href="{{ weberl_url:ensure_path(@home) }}"{: /if :}>home</a>
+<button class="btn {: if @active :}active{: /if :}">go</button>       <!-- inside a value -->
+<li class="{: for C <- @classes :}{{ C }} {: /for :}">
+```
+
+- **Between attributes** a branch is a list of whole attributes (an interpolation there would be an attribute
+  name, so it is refused; interpolation *inside a value* of an attribute in the branch is fine). Weberl adds the
+  separating white space itself: the body of a branch that is taken is rendered between a leading and a
+  trailing space (HTML ignores more than one), so `checked{: /if :}name="x"` needs none written. A branch may
+  end with a complete valueless attribute (`checked`), not in the middle of an attribute (`a=`, an open quote).
+  A branch that is not taken, and an `if` without `else`, render nothing, so no white space is left behind. A
+  block may also follow a finished valueless attribute (`<input disabled {: if ... :}`), but not a name that is
+  still being written (`<input disabled{: if ... :}` is an error).
+- **Inside a quoted value** nothing is added: a space there is data (`title="Hello{: if @x :}!{: /if :}"` is
+  `Hello!` or `Hello`), so write the spaces a class list needs yourself (`class="btn {: if @on :}active {: /if :}big"`).
+  Interpolation follows the value rules: escaped, never raw `{{{ }}}`.
+- **Refused**: the value of a URL attribute (`href`, `src`, `action`...: whether a branch is a whole URL or a
+  part is not known after it) and of `style`, `on*`, `srcset` and the other restricted attributes
+  (`{block_in_restricted_attribute, Attr}`); a whole conditional URL attribute is fine, as in the second line
+  above. Regions, slots and `{: content :}` stay in HTML text.
+- On a live page the element is part of the region that re-renders, so the attributes follow the assigns.
 
 ### Rendering
 
@@ -1542,8 +1575,8 @@ See `ROADMAP.md` for the running list. Notable points:
 - A router process killed without cleanup leaves its listener serving until the
   same router name is started again.
 - No wildcard routes (a parameter is one segment), middleware execution, authentication,
-  nested layouts or components in templates, blocks (`if`, `case`, `for`) inside tags and attributes,
-  and no hot reloading.
+  nested layouts or components in templates, blocks (`if`, `case`, `for`) inside URL and other restricted
+  attribute values or `<script>` and `<style>`, and no hot reloading.
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.

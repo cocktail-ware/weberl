@@ -16,7 +16,8 @@ blocks_test_() ->
       {"a case inside a region binds and matches on each render", fun case_in_region/0},
       {"an if outside any region is not updated", fun conditional_outside_region/0},
       {"a region in a branch is pushed whether or not it is shown", fun region_in_a_branch/0},
-      {"an expression that raises while re-rendering is logged and the page goes on", fun raising_region/0}]}.
+      {"an expression that raises while re-rendering is logged and the page goes on", fun raising_region/0},
+      {"a conditional attribute in a region is re-rendered with the region", fun attribute_block_in_region/0}]}.
 
 source(Module) ->
     "-module(" ++ atom_to_list(Module) ++ "). -export([handle/1]). "
@@ -123,6 +124,25 @@ region_in_a_branch() ->
 
 %% `for' over something that is not a list raises while re-rendering the region: the
 %% session logs it and keeps going, the other regions are unaffected.
+%% Blocks between attributes and inside a value (HANDOFF decision 14): the element is part of the region, so
+%% a change of the assign replaces it with its new attributes.
+attribute_block_in_region() ->
+    View = weberl_test_handlers:unique("attr"),
+    weberl_test_handlers:load(View, source(View)),
+    {ok, C} = weberl_template:compile_source(
+                View, <<"{: region toggle :}<input {: if @on :}checked{: /if :} "
+                        "class=\"box {: if @big :}big{: /if :}\">{: /region toggle :}">>, "t.weberl"),
+    ok = weberl_template:load(C),
+    {ok, Id} = weberl_live:open(blocks_owner, one_way, #{handler => View}),
+    ok = weberl_live:attach(Id, self()),
+    Request = weberl_request:with_page(weberl_request:new(#{method => <<"GET">>, path => "/p"}), Id),
+    First = iolist_to_binary(weberl_live:mount(View, Request, weberl_view_data:new(#{on => false, big => false}))),
+    ?assertEqual(<<"<weberl-region name=\"toggle\"><input  class=\"box \"></weberl-region>">>, First),
+    ok = weberl_live:assign(Id, #{on => true}),
+    ?assertEqual({toggle, <<"<input  checked  class=\"box \">">>}, region(Id)),
+    ok = weberl_live:assign(Id, #{big => true}),
+    ?assertEqual({toggle, <<"<input  checked  class=\"box big\">">>}, region(Id)).
+
 raising_region() ->
     {Id, _} = page(),
     quiet(fun() ->

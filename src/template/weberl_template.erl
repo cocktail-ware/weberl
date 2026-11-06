@@ -205,7 +205,9 @@ validate_and_compile(View, Ast, File, Layout, Opts) ->
 
 %% URL attributes (links are checked, placeholders rewritten), then the locals of what
 %% was rewritten are checked like any others.
-analyze_and_compile(View, Full, File, Layout, Opts) ->
+analyze_and_compile(View, Full0, File, Layout, Opts) ->
+    %% blocks between the attributes of a tag get their separating spaces first
+    Full = weberl_template_attrs:prepare(Full0),
     case weberl_template_urls:analyze(Full, File, Opts) of
         {ok, Analyzed, Warnings} ->
             case weberl_template_parser:check_scope(Analyzed, File) of

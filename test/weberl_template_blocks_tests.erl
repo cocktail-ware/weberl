@@ -290,12 +290,12 @@ misplaced_branch_tags_test() ->
                  err(<<"{: if @a :}{: region r :}{: else :}{: /region r :}{: /if :}">>)).
 
 %% ---------------------------------------------------------------------
-%% Where blocks may stand (HTML text only; each branch ends in text)
+%% Where blocks may stand: text, between attributes and inside the value of a plain attribute
+%% (weberl_template_attr_blocks_tests); each branch ends where the block began
 
 blocks_only_in_html_text_test() ->
-    ?assertEqual({1, {block_in_unsupported_context, 'if', tag}}, err(<<"<p {: if @a :}x{: /if :}>">>)),
-    ?assertEqual({1, {block_in_unsupported_context, 'for', attribute_value}},
-                 err(<<"<p class=\"{: for X <- @l :}a{: /for :}\">">>)),
+    ?assertEqual({1, {block_in_unsupported_context, 'if', tag}}, err(<<"<p class=a{: if @a :}x{: /if :}>">>)),
+    ?assertEqual({1, {block_in_unsupported_context, 'if', lt}}, err(<<"<{: if @a :}p{: /if :}>">>)),
     ?assertEqual({1, {block_in_unsupported_context, 'case', <<"script">>}},
                  err(<<"<script>{: case @a :}{: of a :}1{: /case :}</script>">>)),
     ?assertEqual({1, {block_in_unsupported_context, 'if', comment}}, err(<<"<!-- {: if @a :}x{: /if :} -->">>)).

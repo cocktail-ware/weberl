@@ -388,28 +388,36 @@ walk([{region, Line, Name, _Tag, Children} | Rest], Ctx, {File, _} = Env) ->
             {error, {syntax_error, File, Line, {region_in_unsupported_context, Name, context_name(Ctx)}}}
     end.
 
-%% `if', `case' and `for' stand in HTML text; every branch and every body is read
-%% from text and has to end in text, so no tag stays open across a branch (the
-%% elements themselves are not matched, as in a region).
+%% `if', `case' and `for' stand in HTML text, between the attributes of a start tag and inside the
+%% quoted value of an attribute that takes plain text (`weberl_template_html:block_context/1'); every
+%% branch and every body is read from the context the block stands in and has to end where it began
+%% (`branch_end_ok/2'), so no tag or quote stays open across a branch (the elements themselves are not
+%% matched, as in a region).
 block(Node, Kind, Line, Rest, Ctx, {File, _} = Env) ->
-    case Ctx of
-        text ->
-            case branches(children(Node), Env) of
+    case weberl_template_html:block_context(Ctx) of
+        unsupported ->
+            {error, {syntax_error, File, Line, {block_in_unsupported_context, Kind, context_name(Ctx)}}};
+        {error, Reason} ->
+            {error, {syntax_error, File, Line, Reason}};
+        _ ->
+            case branches(children(Node), Env, Ctx) of
                 ok -> walk(Rest, Ctx, Env);
                 {error, unbalanced} -> {error, {syntax_error, File, Line, {block_unbalanced_markup, Kind}}};
                 {error, _} = Error -> Error
-            end;
-        _ ->
-            {error, {syntax_error, File, Line, {block_in_unsupported_context, Kind, context_name(Ctx)}}}
+            end
     end.
 
-branches([], _Env) ->
+branches([], _Env, _Start) ->
     ok;
-branches([Children | Rest], Env) ->
-    case walk(Children, weberl_template_html:initial(), Env) of
-        {ok, text} -> branches(Rest, Env);
-        {ok, _Other} -> {error, unbalanced};
-        {error, _} = Error -> Error
+branches([Children | Rest], Env, Start) ->
+    case walk(Children, Start, Env) of
+        {ok, End} ->
+            case weberl_template_html:branch_end_ok(Start, End) of
+                true -> branches(Rest, Env, Start);
+                false -> {error, unbalanced}
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
 %% @doc The child ASTs of a node: the contents of a region, slot or fill, and every

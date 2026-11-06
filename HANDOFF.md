@@ -436,6 +436,38 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   cookie, the event handler), `weberl_csrf_tests` and `weberl_request_helpers_tests` updated; 998 eunit tests;
   browser suite not re-run. README "Forms and uploads" written. Next in the user's order: blocks inside tags and
   attributes, then runtime layouts.
+- **Decision 14 (blocks inside tags and attributes; user, 2026-11-06).** `{: if :}`, `{: case :}` and
+  `{: for :}` may stand (a) **between attributes** of a start tag and (b) **inside the quoted value of an
+  attribute that takes plain text**; the user will want a different HTML parsing system later, out of scope now.
+  Every branch or body is read from the context where the block stands and must end in the same one. (a)
+  Between attributes: the block must stand where the tracker is between attributes (`in_tag`); each branch is a
+  list of whole attributes (interpolation there stays refused: it would be an attribute name); **Weberl adds the
+  separating white space itself**: the body of a taken branch is rendered between a leading and a trailing space
+  (HTML ignores more than one), so a branch may end with a complete valueless attribute (`checked`, or after
+  white space) but not mid-attribute (`data-`, `a=`, an open quote); a branch that is not taken, and an `if`
+  without `else`, render nothing (no spaces). (b) Inside a value: the branch must end in the same attribute and
+  quote; **no spaces are added** (a space in a value is data); interpolation follows the value rules (escaped,
+  never raw). Refused, as for interpolation: the value of a URL attribute (position of a part is unknown after a
+  branch, the safe-URL checks need it) and of `style`, `on*`, `srcset` and the other restricted attributes
+  (`{block_in_restricted_attribute, Attr}`); `<script>`, `<style>`, comments, tag and attribute names, unquoted
+  values; regions, slots, fills and `{: content :}` (text only). A whole conditional URL attribute is fine
+  (`{: if :}href="/a"{: /if :}` is between attributes). Code generation does not change: a small pass
+  (`weberl_template_attrs`) wraps the bodies of tag-level blocks with space text nodes; the validation walk and the
+  URL analysis start each branch in the context of the block. Out of scope: whitespace control for block tags,
+  boolean attribute sugar, spaces for token-list attributes such as `class`.
+- **Blocks in tags and attributes built (2026-11-06, decision 14).** `weberl_template_html:block_context/1`
+  (`text | tag | value | unsupported | {error, {block_in_restricted_attribute, Attr}}`; `tag` is `in_tag` and
+  also `after_attr_name`, so a block may follow a finished valueless attribute and white space, not a name still
+  being written) and `branch_end_ok/2`; `weberl_template_parser:block/6` and `branches/3` read each branch from
+  the block's context; the new `weberl_template_attrs:prepare/1` wraps the bodies of blocks between attributes
+  in space text nodes (run in `weberl_template:analyze_and_compile/5` before the URL analysis); the URL analysis
+  starts a block's children in its context (a conditional `href="{{ weberl_url:... }}"` in a branch is checked
+  as any other). `case_clause`-style empty branches render their two spaces; an `if` without `else` and a branch
+  not taken render nothing. Tests: `weberl_template_attr_blocks_tests` (25: optional and boolean attributes,
+  if/else/case/for/nesting, class lists, escaping, branch ends, every refusal), the old
+  `blocks_only_in_html_text_test` narrowed, `weberl_live_blocks_tests` (a conditional attribute in a region is
+  re-rendered with it); 1023 eunit tests; browser suite not re-run. README "Conditional attributes". Next in
+  the user's order: **runtime layouts** (the last item).
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)
