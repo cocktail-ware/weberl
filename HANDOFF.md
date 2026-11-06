@@ -490,7 +490,9 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `weberl_view_data:layout/1`, `with_layout/2`, `render_opts/1`; `weberl_live:mount/4`, `update_topic/5`,
   `region_event/4`; the session re-renders with the page's layout and a record built afresh keeps it.
   Found by the tests: a non-atom layout name hit `atom_to_list` before the membership check. Tests:
-  `weberl_runtime_layout_tests` (19); 1042 eunit tests; browser suite not re-run. README "Choosing the layout
+  `weberl_runtime_layout_tests` (19); 1042 eunit tests; browser suite (Chromium) 30 specs plain and 39 layouts,
+  all green, including the new `runtime-layouts.spec.js` (5 specs, `/switch` page of the layouts variant with
+  `layouts/admin.weberl`: per-request layout, `none`, live regions of the admin layout). README "Choosing the layout
   per render". **All items of the user's order are done.**
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 

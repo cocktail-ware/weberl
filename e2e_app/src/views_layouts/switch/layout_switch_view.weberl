@@ -1,0 +1,4 @@
+<script src="/static/switch.js" defer></script>
+<h1>Switch</h1>
+<p>Name: {: region name :}<strong id="name">{{ @name }}</strong>{: /region name :}
+    <button id="rename" type="button">Rename</button></p>

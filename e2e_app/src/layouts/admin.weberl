@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Admin: {{ @title }}</title>
+    {: slot head :}{: /slot head :}
+</head>
+<body class="admin">
+<aside>{: region who :}<span id="who">{{ @who }}</span>{: /region who :}</aside>
+{: content :}
+</body>
+</html>
