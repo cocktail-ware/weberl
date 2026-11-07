@@ -69,17 +69,19 @@ bad_return(Handler, Name, Other) ->
 
 %% @doc The snapshots a page that just (re)subscribed receives, in topic order:
 %% `handle_subscribe/2' of the token's handler for each of its topics.
--spec snapshots(weberl_live:page_id(), weberl_live_guard:claims()) -> [{binary(), binary()}].
+-spec snapshots(weberl_live:page_id(), weberl_live_guard:claims()) ->
+    [{binary(), binary() | {json, binary()}}].
 snapshots(PageId, #{kind := Kind, handler := Handler, topics := Topics}) ->
     Context = context(PageId, Kind, Topics),
     [{Name, Data} || Topic <- Topics,
                      {snapshot, Name, Data} <- [subscribe(Handler, Topic, Context)]].
+%% `Data' is the text of the event, or `{json, Json}' (`snapshot_json') for a value.
 
 %% @doc Run `Handler:handle_subscribe(Topic, Context)'; `{snapshot, Name, Data}'
-%% when the handler has one to send, `none' otherwise (no callback, `ok', or a
+%% (`Data' a binary, or `{json, Json}' for `{snapshot_json, Name, Term}') when the handler has one to send, `none' otherwise (no callback, `ok', or a
 %% failure, which is logged).
 -spec subscribe(module() | undefined, weberl_live:topic(), weberl_handler:page_context()) ->
-    {snapshot, binary(), binary()} | none.
+    {snapshot, binary(), binary() | {json, binary()}} | none.
 subscribe(Handler, Topic, Context) ->
     case Handler =/= undefined andalso erlang:function_exported(Handler, handle_subscribe, 2) of
         false ->
@@ -88,13 +90,23 @@ subscribe(Handler, Topic, Context) ->
             try Handler:handle_subscribe(Topic, Context) of
                 ok ->
                     none;
-                {snapshot, <<"weberl_", _/binary>>, _} = Other ->
+                {Tag, <<"weberl_", _/binary>>, _} = Other when Tag =:= snapshot; Tag =:= snapshot_json ->
                     %% the prefix belongs to the browser scripts, see weberl_live:push/3
                     ?LOG_ERROR(#{what => live_subscribe_bad_return, handler => Handler,
                                  topic => Topic, returned => Other, reason => reserved_event_name}),
                     none;
                 {snapshot, Name, Data} when is_binary(Name) ->
                     {snapshot, Name, iolist_to_binary(Data)};
+                {snapshot_json, Name, Term} when is_binary(Name) ->
+                    %% encoded once, here (the clauses of `of' are not covered by the `catch')
+                    try iolist_to_binary(json:encode(Term)) of
+                        Json -> {snapshot, Name, {json, Json}}
+                    catch
+                        error:Reason ->
+                            ?LOG_ERROR(#{what => live_subscribe_bad_return, handler => Handler,
+                                         topic => Topic, returned => {snapshot_json, Name, Term}, reason => Reason}),
+                            none
+                    end;
                 Other ->
                     ?LOG_ERROR(#{what => live_subscribe_bad_return, handler => Handler,
                                  topic => Topic, returned => Other}),

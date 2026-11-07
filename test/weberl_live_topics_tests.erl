@@ -35,7 +35,8 @@ topics_test_() ->
       {"sse: the topic membership ends with the stream", fun sse_leaves/0},
       {"poll: snapshot on request, topic events, membership ends", fun poll/0},
       {"publish_json: the frame carries a value, not a string", fun publish_json_frame/0},
-      {"poll: publish_json data is a value", fun poll_json/0}]}.
+      {"poll: publish_json data is a value", fun poll_json/0},
+      {"snapshot_json: a value on ws and poll, a bad term is dropped", fun snapshot_json/0}]}.
 
 %% ---------------------------------------------------------------------
 %% Handlers and routes
@@ -53,7 +54,12 @@ routes() ->
                        "  {snapshot, <<\"snap\">>, <<\"ACME-state\">>}; "
                        "handle_subscribe(_, _) -> ok. "),
     Boom = handler_source("handle_subscribe(_, _) -> error(boom). "),
-    [{"/topic", H, #{live => two_way, session => false}},
+    J = handler_source("handle_subscribe(<<\"stock:ACME\">>, _) -> "
+                       "  {snapshot_json, <<\"state\">>, #{running => 3, names => [<<\"a\">>]}}; "
+                       "handle_subscribe(_, _) -> {snapshot_json, <<\"bad\">>, {a, tuple}}. "),
+    [{"/json", J, #{live => two_way, session => false}},
+     {"/jsonpoll", J, #{live => one_way, session => false}},
+     {"/topic", H, #{live => two_way, session => false}},
      {"/mixed", H, #{live => two_way}},
      {"/sse", H, #{live => one_way, session => false}},
      {"/boom", Boom, #{live => two_way, session => false}}].
@@ -448,6 +454,25 @@ sse_leaves() ->
         await_members(?ACME, 1),
         gen_tcp:close(Sock),
         await_members(?ACME, 0)
+    end).
+
+snapshot_json() ->
+    weberl_live_test_util:quiet(fun() ->
+        with_router(routes(), fun(Name) ->
+            {ok, Sock, Buf} = ws_connect(Name, []),
+            {Id, _} = Page = new_page(Name, "/json"),
+            {[Snap], _} = subscribe(Sock, Buf, Page, 1),
+            ?assertEqual(#{~"page" => Id, ~"event" => ~"state",
+                           ~"data" => #{~"running" => 3, ~"names" => [~"a"]}}, Snap),
+            gen_tcp:close(Sock),
+            {Id2, Token} = new_page(Name, "/jsonpoll"),
+            Path = "/_weberl/poll/" ++ binary_to_list(Id2),
+            Headers = [{"x-weberl-token", binary_to_list(Token)}],
+            {200, _, Body} = request(Name, get, Path ++ "?snapshot=1", Headers, undefined),
+            ?assertEqual(#{~"events" => [#{~"event" => ~"state",
+                                           ~"data" => #{~"running" => 3, ~"names" => [~"a"]}}],
+                           ~"closed" => false}, json:decode(Body))
+        end)
     end).
 
 poll() ->

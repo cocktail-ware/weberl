@@ -1434,6 +1434,10 @@ handle_subscribe(_Topic, _Page) ->
     ok.
 ```
 
+`{snapshot_json, Name, Term}` sends a value instead: `Term` is encoded as JSON once and the browser
+receives it decoded, like an event of `publish_json/3` (`Weberl.on("tasks", function (data) { data.running })`),
+not as a string to parse. A term JSON cannot hold is logged and sends no snapshot.
+
 It runs again on every reconnect (a WebSocket resubscribe, a new SSE stream) and, for
 long-poll, on the first poll and the first poll after a failure (events published between
 two polls are lost; the poll fallback accepts that). Make updates idempotent (send full

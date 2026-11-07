@@ -141,12 +141,17 @@ topic_event_json(Topic, Name, Json) ->
 
 %% @doc A pushed event for a transport that carries one page (the SSE stream):
 %% `{"event": Name, "data": Data}'.
--spec event(binary(), binary()) -> iodata().
+-spec event(binary(), binary() | {json, binary()}) -> iodata().
+event(Name, {json, Json}) ->
+    [<<"{\"event\":">>, json:encode(Name), <<",\"data\":">>, Json, $}];
 event(Name, Data) ->
     json:encode(#{event => Name, data => Data}).
 
 %% @doc A pushed event on the multiplexed socket, tagged with its page.
--spec event(weberl_live:page_id(), binary(), binary()) -> iodata().
+-spec event(weberl_live:page_id(), binary(), binary() | {json, binary()}) -> iodata().
+event(PageId, Name, {json, Json}) ->
+    [<<"{\"page\":">>, json:encode(PageId), <<",\"event\":">>, json:encode(Name),
+     <<",\"data\":">>, Json, $}];
 event(PageId, Name, Data) ->
     json:encode(#{page => PageId, event => Name, data => Data}).
 

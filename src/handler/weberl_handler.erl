@@ -43,9 +43,12 @@
 %% it can catch up on what it missed; `ok' sends nothing. It runs in the
 %% connection process, blocking it (and the other pages of that connection)
 %% while it runs, so keep it short. A crash is logged and the subscription
-%% continues without a snapshot.
+%% continues without a snapshot. `{snapshot_json, Name, Term}' sends a value, as
+%% {@link weberl_live:publish_json/3} does: `Term' is encoded as JSON once and the
+%% browser receives it decoded, not as a string (a term JSON cannot hold is a logged
+%% failure, like a crash).
 -callback handle_subscribe(Topic :: weberl_live:topic(), Page :: page_context()) ->
-    {snapshot, Name :: binary(), Data :: iodata()} | ok.
+    {snapshot, Name :: binary(), Data :: iodata()} | {snapshot_json, Name :: binary(), Term :: term()} | ok.
 -optional_callbacks([handle_request/3, weberl_topics/1, handle_subscribe/2]).
 %% What a callback is told about the page: its id, kind and topics, taken from
 %% the verified token. There is no user data in it: put what a callback needs
