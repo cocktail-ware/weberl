@@ -2,5 +2,5 @@
 // version the page's scripts do not have (see WeberlEngine.shared in engine.js).
 importScripts("/_weberl/engine.js");
 self.onconnect = function (event) {
-  event.ports[0].postMessage({ hello: 2 });
+  event.ports[0].postMessage({ hello: 3 });
 };
