@@ -165,7 +165,7 @@ publish_json_frame() ->
         ok = weberl_live:publish_json(?ACME, <<"s">>, <<"x">>),
         {ok, {_, _, _, _, F2}} = received(A),
         ?assertEqual(~"x", maps:get(~"data", json:decode(F2))),
-        ?assertError(_, weberl_live:publish_json(?ACME, <<"bad">>, self())),
+        ?assertError({unsupported_type, _}, weberl_live:publish_json(?ACME, <<"bad">>, self())),
         ?assertEqual(none, received(A))
     end).
 

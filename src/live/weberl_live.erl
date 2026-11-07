@@ -102,8 +102,8 @@ publish(Topic, Name, Data) when is_binary(Topic), is_binary(Name) ->
 %% (`json:encode/1': maps, lists, binaries, numbers, booleans, `null') and the
 %% browser receives the decoded value, not a string to parse again:
 %% `Weberl.on("tasks", function (data) { data.running ... })', and `event.detail'
-%% of `weberl:tasks' is the value. A term JSON cannot hold raises `badarg'/an
-%% error from `json:encode/1' in the caller, nothing is sent.
+%% of `weberl:tasks' is the value. A term JSON cannot hold (a pid, a tuple...)
+%% raises `error:{unsupported_type, Term}' in the caller, before anything is sent.
 -spec publish_json(topic(), binary(), term()) -> ok.
 publish_json(Topic, Name, Term) when is_binary(Topic), is_binary(Name) ->
     Json = iolist_to_binary(json:encode(Term)),
