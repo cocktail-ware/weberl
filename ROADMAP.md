@@ -61,6 +61,16 @@ specification; kept here so they don't clutter active work.
     step; each allowed pair would compose the chain;
   - picking the layout per request without the handler passing it (a route-level function of the request).
 
+## Components
+- File components (`components` directories, `{: component name, Params :} ... {: /component :}`, inlined at
+  compile time) are the first step; the design is recorded in `HANDOFF.md`. Possible later: **function
+  components**, `{: component my_components:panel, #{title => "x"} :} ... {: /component :}`, calling
+  `Module:Function(Params, Body)` with the caller's rendered body (iodata) and inserting the iodata it returns
+  raw (the author escapes, `weberl_template_runtime:escape/1`). The `Module:Function` form tells it from a file
+  component. Opaque to dependency tracking (the dependencies are those of the parameter expression and the
+  body); a missing function is a render-time error unless the router start checks that the module exports
+  `Function/2`; the body stays a single `content`, no named slots.
+
 ## Session
 - Automatic loading of the request's session into the handler's response (`weberl_session:run/2`, the
   process dictionary) is behind the internal env `session_autoload` (default `true`). Planned: make it

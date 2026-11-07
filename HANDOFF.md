@@ -494,6 +494,35 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   all green, including the new `runtime-layouts.spec.js` (5 specs, `/switch` page of the layouts variant with
   `layouts/admin.weberl`: per-request layout, `none`, live regions of the admin layout). README "Choosing the layout
   per render". **All items of the user's order are done.**
+- **Feedback round 3 from `agentic` (2026-11-07), order agreed with the user: 3, 2, 5a, then 4.** Done: (3) integers
+  as `attrs` values of `{: form :}`; (2) `{snapshot_json, Name, Term}` from `handle_subscribe/2`; (5a) `data => Term` in
+  the route options and `weberl_request:route_data/1`. Left open from the feedback: 1 (defaults for live pages,
+  set aside), 5b/5c (a resource-with-actions behaviour, re-rendering a view with an error: a convention).
+- **Components (item 4), decisions of the user, 2026-11-07, one point at a time:**
+  1. *Where.* File components, inlined at compile time: `.weberl` files under the router's `components`
+     directories (a list, like `layouts`, no default; several allowed), **nested directories allowed and part of the
+     name** (`components/forms/field.weberl` is `forms/field`); the same name in two directories is
+     `{duplicate_components, ...}` at start. Use: `{: component panel, #{title => "x"} :} body {: /component :}`,
+     always paired. A component sees only its parameters, never the caller's assigns; it cannot use itself.
+     Function components (`my_components:fun`) are recorded in `ROADMAP.md`, not built.
+  2. *Parameters.* Declared at the top of the component file: `{: param title :}` (required), `{: param open, false :}`
+     (optional; the default is an Erlang expression that reads no assigns or parameters, evaluated per render). The
+     call passes a literal map with atom keys (`#{title => "x", open => @flag}`), the values are expressions in the
+     caller's scope; any other expression is rejected (start-time checks need the keys). Start-time errors with file
+     and line: `{missing_component_param, C, Name}`, `{unknown_component_param, C, Name}`,
+     `{undeclared_assign, C, Name}` (the component reads `@x` it did not declare), duplicate declarations, `param`
+     only at the top of a component file. Region dependencies of a call = the assigns read by the value expressions
+     and the body.
+  3. *Body and slots.* `{: content :}` in the component is where the call's body goes (at most once, may stand in
+     `if`/`case` branches); `{: slot name :}default{: /slot name :}` in the component with
+     `{: fill name :}...{: /fill name :}` as top-level blocks inside the call, the layout rules (names once per file,
+     `content` reserved, no slot in a slot, balanced HTML, a fill for no slot is an error). The body and the fills are
+     compiled in the caller's scope (its assigns and locals); a slot default belongs to the component (sees its
+     parameters). A component without `{: content :}` takes only white space besides fills. A region may not stand in
+     a component file or a slot default (the component is inlined, region names stay unique); regions in a fill or the
+     body belong to the caller's view. Errors: `{unknown_fill, Name, Component}`, `{duplicate_fill, ..}`,
+     `{fill_not_top_level, Name}`, `{component_without_content, C}`, `{duplicate_slot, ..}`, `{slot_in_slot, ..}`,
+     `{content_in_slot, ..}`, `{region_in_component, Name}`, `{duplicate_content, C}`.
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)
