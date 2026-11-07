@@ -498,6 +498,10 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   as `attrs` values of `{: form :}`; (2) `{snapshot_json, Name, Term}` from `handle_subscribe/2`; (5a) `data => Term` in
   the route options and `weberl_request:route_data/1`. Left open from the feedback: 1 (defaults for live pages,
   set aside), 5b/5c (a resource-with-actions behaviour, re-rendering a view with an error: a convention).
+- **Feedback round 3, state at the end of 2026-11-07:** items 2, 3, 4 and 5a are built (not yet adopted in agentic).
+  5b/5c wait on how agentic uses `route_data`; item 1 (defaults for live pages) is **not pursued yet**; the idea of forms
+  over a two-way connection with a fallback to plain forms is recorded in `ROADMAP.md` ("Controller-like routing and
+  live-page defaults"). agentic's `WEBERL_FEEDBACK.md` says the same.
 - **Components built (2026-11-07).** `weberl_template_component` (`load/2` reads the `components` directories,
   `expand/3` inlines the calls), new nodes `component`, `param` and `scope` in `weberl_template_parser`,
   lexer tokens `component_open/close` and `param`, `scope` node in `weberl_template_compiler` (a fun binding the

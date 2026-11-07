@@ -61,6 +61,26 @@ specification; kept here so they don't clutter active work.
     step; each allowed pair would compose the chain;
   - picking the layout per request without the handler passing it (a route-level function of the request).
 
+## Controller-like routing and live-page defaults (feedback from agentic, 2026-11-07)
+- **Several actions for one resource: waiting on agentic.** Route `data` (`weberl_request:route_data/1`) is built, so
+  one directory per action can share a handler module. agentic moves its multi-action views to it first; what is
+  still repetitive then decides the rest:
+  - a behaviour or convention for a "resource with actions" (`Module:handle(Action, Request)` generated from one
+    declaration): not designed;
+  - re-rendering a page's view with an error from an action handler: `weberl_template:render(View, Assigns)` already
+    works from any module, so this is a convention to document, not an API.
+- **Forms over the live connection (idea, worth building).** A two-way page's `handle_request/3` already takes named
+  requests, so an action needs no hidden `action` field and no page reload. Wanted: a form block/component that renders
+  the same form for every page kind: on a `two_way` page it is sent through the connection (needs JavaScript, answered
+  by `handle_request/3`, errors and success patched into regions); on `one_way` and `normal` pages it is an ordinary
+  HTML form (POST, CSRF, redirect) handled by a route. The seamless conversion is the hard part: one declaration
+  of the form and its action, two transports, the same validation errors. Builds on `{: form :}`, components and
+  regions.
+- **Defaults for live pages: not pursued yet.** agentic repeats `-weberl_route(#{live => one_way, layout => main})` and
+  the same `weberl_topics/1` / `handle_subscribe/2` in six views. Sketched, not decided: (1) a router option
+  `route_defaults` that each route's own options narrow key by key; (2) a router-level module that supplies the two
+  callbacks to live views without their own (the route map already carries the view's `handler`). Nothing is built.
+
 ## Components
 - File components (`components` directories, `{: component name, Params :} ... {: /component :}`, inlined at
   compile time) are the first step; the design is recorded in `HANDOFF.md`. Possible later: **function
