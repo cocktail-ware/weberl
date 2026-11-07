@@ -186,7 +186,9 @@ flow_test_() ->
               {"PUT and DELETE are checked too", fun() -> other_methods(Name) end},
               {"mode origin: no token, foreign origin refused", fun() -> origin_mode(Name) end},
               {"mode false: nothing is checked", fun() -> off_mode(Name) end},
-              {"GET is never checked", fun() -> get_not_checked(Name) end}]
+              {"GET is never checked", fun() -> get_not_checked(Name) end},
+              {"a {: form :} block needs no protect/2: cookie, headers and token come from dispatch",
+               fun() -> form_block(Name) end}]
      end}.
 
 start_app() ->
@@ -199,9 +201,18 @@ start_app() ->
     Submit = handler("submit", """
         handle(R) -> weberl_response:text(200, <<"saved ", (weberl_request:method(R))/binary>>).
         """),
+    Block = weberl_test_handlers:unique("block"),
+    weberl_test_handlers:load(
+      Block, "-module(" ++ atom_to_list(Block) ++ "). -export([handle/1]). "
+      "handle(_) -> weberl_response:html(200, weberl_template:render(" ++ atom_to_list(Block) ++ ", #{}))."),
+    {ok, Compiled} = weberl_template:compile_source(
+                       Block, <<"{: form weberl_url:ensure_path(<<\"/submit\">>) :}<input name=\"title\">{: /form :}">>,
+                       "block.weberl"),
+    ok = weberl_template:load(Compiled),
     Name = weberl_test_handlers:unique("csrf_flow"),
     M = weberl_test_handlers:unique("csrf_flow_router"),
     load_router(M, [{"/page", Page},
+                    {"/block", Block},
                     {"/submit", Submit},
                     {"/hook", Submit, #{csrf => origin}},
                     {"/open", Submit, #{csrf => false}}]),
@@ -261,6 +272,19 @@ page_again(Name) ->
     Token = token_of_cookie(H),
     {H2, B2} = fetch_page(Name, [cookie_header(Token)]),
     ?assertEqual(Token, token_in_form(B2)),
+    ?assertEqual([], proplists:get_all_values("set-cookie", H2)).
+
+form_block(Name) ->
+    {200, H, B} = http(get, Name, "/block", [], <<>>),
+    T = token_of_cookie(H),
+    ?assertEqual(T, token_in_form(B)),
+    ?assertEqual("private, no-store", proplists:get_value("cache-control", H)),
+    ?assertMatch(<<"<form method=\"post\" action=\"/submit\">", _/binary>>, B),
+    %% and the token it wrote is accepted
+    ?assertMatch({200, _, <<"saved POST">>}, http(post, Name, "/submit", [cookie_header(T)], body(T))),
+    %% a browser that has the cookie gets the same token and no new cookie
+    {200, H2, B2} = http(get, Name, "/block", [cookie_header(T)], <<>>),
+    ?assertEqual(T, token_in_form(B2)),
     ?assertEqual([], proplists:get_all_values("set-cookie", H2)).
 
 new_token(Name) ->

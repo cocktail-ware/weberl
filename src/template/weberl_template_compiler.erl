@@ -115,6 +115,19 @@ part({expr, Line, Mode, #{form := Form, source := Source}}, View) ->
     Value = weberl_blocks_expr:render(Form, hooks(View)),
     {call, Line, {remote, Line, {atom, Line, weberl_template_runtime}, {atom, Line, Fun}},
      [Value, {atom, Line, View}, erl_parse:abstract(Source, Line)]};
+%% `{: form Action [, Opts] :}' ... `{: /form :}': the opening tag (with the CSRF field) is written by
+%% the runtime, the closing tag is literal.
+part({form, Line, #{action := #{form := ActionForm, url := #{policy := Policy, position := Position}} = _Action,
+                    opts := Opts, in_region := InRegion}, Children}, View) ->
+    ActionValue = weberl_blocks_expr:render(ActionForm, hooks(View)),
+    OptsValue = case Opts of
+                    none -> {map, Line, []};
+                    #{form := OptsForm} -> weberl_blocks_expr:render(OptsForm, hooks(View))
+                end,
+    Open = {call, Line, {remote, Line, {atom, Line, weberl_template_runtime}, {atom, Line, form_open}},
+            [ActionValue, OptsValue, {atom, Line, View}, {integer, Line, Line}, {atom, Line, InRegion},
+             erl_parse:abstract({Policy, Position}, Line)]},
+    {cons, Line, Open, {cons, Line, body(Children, View), {cons, Line, erl_parse:abstract(<<"</form>">>, Line), {nil, Line}}}};
 %% `if' / `elif' / `else': each condition has to be exactly `true' or `false'.
 part({'if', Line, Branches, Else}, View) ->
     if_chain(Branches, Else, Line, View);

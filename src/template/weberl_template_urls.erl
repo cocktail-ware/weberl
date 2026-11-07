@@ -75,6 +75,12 @@ walk([{expr, Line, escaped, Parsed} | Rest], {{value, _, Tag, Attr} = Ctx, Val},
             {Rest2, State} = walk(Rest, {Ctx, bump(Val)}, Env),
             {[{expr, Line, escaped, Parsed} | Rest2], State}
     end;
+%% `{: form Action :}': the action is a link in an `action' attribute of a `form'
+walk([{form, Line, #{action := Action} = Head, Children} | Rest], {Ctx, _} = State, Env) ->
+    Head2 = Head#{action := url_expr(Action, <<"form">>, <<"action">>, none, Line, Env)},
+    {Children2, _} = walk(Children, {Ctx, none}, Env),
+    {Rest2, State2} = walk(Rest, State, Env),
+    {[{form, Line, Head2, Children2} | Rest2], State2};
 walk([{expr, _, _, _} = Node | Rest], {Ctx, Val}, Env) ->
     {Rest2, State} = walk(Rest, {Ctx, bump(Val)}, Env),
     {[Node | Rest2], State};
@@ -395,6 +401,8 @@ warnings(Ast, File) ->
     lists:flatmap(fun(Node) ->
                           Own = case Node of
                                     {expr, Line, _, #{warnings := W}} -> [{warning, File, Line, X} || X <- W];
+                                    {form, Line, #{action := #{warnings := W}}, _} ->
+                                        [{warning, File, Line, X} || X <- W];
                                     _ -> []
                                 end,
                           Own ++ lists:flatmap(fun(Children) -> warnings(Children, File) end,

@@ -91,7 +91,16 @@ tag(PageId, Kind, Claims) ->
                       "\" data-weberl-kind=\"", atom_to_binary(Kind),
                       "\" data-weberl-fallback=\"", Fallback, "\"",
                       topics_attribute(maps:get(topics, Claims, [])),
+                      csrf_attribute(),
                       " defer></script>"]).
+
+%% The token of the page, when its forms used one (`{: form :}'): the browser puts it into the forms
+%% of a region that the server re-renders without a request. It is on the page in the forms anyway.
+csrf_attribute() ->
+    case weberl_csrf:used_token() of
+        {ok, Token} -> [" data-weberl-csrf=\"", escape(Token), "\""];
+        none -> ""
+    end.
 
 topics_attribute([]) -> "";
 topics_attribute(Topics) ->

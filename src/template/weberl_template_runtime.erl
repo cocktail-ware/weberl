@@ -15,7 +15,7 @@
 %% untrusted input.
 -module(weberl_template_runtime).
 
--export([assign/3, escaped/3, raw/3, url/4, escape/1, json_script/3, json_attr/3]).
+-export([assign/3, escaped/3, raw/3, url/4, escape/1, json_script/3, json_attr/3, form_open/6]).
 
 
 %% @doc An interpolation inside a URL attribute (`href', `src', ...): the value has to
@@ -28,13 +28,47 @@
 %% `{unsafe_url, View, Line, Tagged}' for a kind the attribute does not take. The
 %% template compiler finds most of these without rendering.
 -spec url(term(), module(), pos_integer(), {web | local_only, start | inner}) -> binary().
-url({weberl_url, Kind, Bin} = Value, View, Line, {Policy, Position}) when is_atom(Kind), is_binary(Bin) ->
+url(Value, View, Line, Policy) ->
+    escape(url_text(Value, View, Line, Policy)).
+
+%% The checked text of a URL value (not yet HTML-escaped).
+url_text({weberl_url, Kind, Bin} = Value, View, Line, {Policy, Position}) when is_atom(Kind), is_binary(Bin) ->
     case url_kind_allowed(Kind, Policy, Position) of
-        true -> escape(Bin);
+        true -> Bin;
         false -> erlang:error({template_error, {unsafe_url, View, Line, Value}})
     end;
-url(Value, View, Line, _Policy) ->
+url_text(Value, View, Line, _Policy) ->
     erlang:error({template_error, {untagged_url, View, Line, Value}}).
+
+%% @doc `{: form Action [, Opts] :}': the opening `<form>' tag and its CSRF field (see
+%% {@link weberl_form:open/3}, `Opts' is its options map). The token is the running handler's (the
+%% request is ambient while it renders; the cookie and the headers are set after the handler). With
+%% no request the token is left empty if the form stands in a region (`InRegion'), which the
+%% browser fills (`weberl_form:csrf_input/2'), and raises `csrf_token_unavailable' otherwise.
+-spec form_open(term(), term(), module(), pos_integer(), boolean(), {web | local_only, start | inner}) ->
+    iodata().
+form_open(ActionValue, Opts, View, Line, InRegion, Policy) ->
+    Action = url_text(ActionValue, View, Line, Policy),
+    is_map(Opts) andalso maps:without([method, enctype, attrs, csrf], Opts) =:= #{}
+        orelse erlang:error({template_error, {bad_form_options, View, Line, Opts}}),
+    Protected = maps:get(method, Opts, post) =/= get andalso maps:get(csrf, Opts, true) =/= false,
+    Multipart = maps:get(enctype, Opts, undefined) =:= multipart,
+    Token = case Protected of
+                false ->
+                    undefined;
+                true ->
+                    case weberl_csrf:render_token() of
+                        {ok, T} ->
+                            T;
+                        none when InRegion andalso not Multipart ->
+                            <<>>;
+                        none ->
+                            erlang:error({template_error, {csrf_token_unavailable, View, Line}})
+                    end
+            end,
+    try weberl_form:open(Token, Action, Opts#{fill => true})
+    catch error:badarg -> erlang:error({template_error, {bad_form_options, View, Line, Opts}})
+    end.
 
 %% `unsafe_url' goes anywhere; a part (after literal text) is an encoded piece; a whole
 %% value is a path, or on a `web' attribute also an absolute URL.

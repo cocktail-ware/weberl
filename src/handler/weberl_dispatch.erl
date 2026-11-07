@@ -72,8 +72,9 @@ decode_params(Raw) ->
 %% The request is available to the session functions of `weberl_response' while
 %% the handler runs; afterwards the session the response carries becomes its cookie.
 with_session(Request, Serve) ->
+    ok = weberl_csrf:begin_request(),
     Response = weberl_session:run(Request, Serve),
-    case weberl_session:finalize(Request, Response) of
+    case weberl_session:finalize(Request, weberl_csrf:finalize(Response)) of
         {ok, Final} ->
             Final;
         {error, Reason} ->

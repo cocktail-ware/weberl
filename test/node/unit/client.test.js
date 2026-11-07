@@ -162,6 +162,24 @@ test("without the engine there is no ready event either", () => {
   assert.deepEqual(t.startup, []);
 });
 
+test("a region patch fills the empty CSRF fields of its forms with the page's token", () => {
+  const t = setup({ "data-weberl-csrf": "tok-1" });
+  const empty = { value: "" }, filled = { value: "own" };
+  const a = element({ querySelectorAll: (sel) => (sel === "input[data-weberl-csrf]" ? [empty, filled] : []) });
+  t.regions.nav = [a];
+  t.sink().event("weberl:region", region("nav", "<form></form>"));
+  assert.equal(empty.value, "tok-1");
+  assert.equal(filled.value, "own", "a field that has a token keeps it");
+});
+
+test("without a page token nothing is filled", () => {
+  const t = setup();
+  const empty = { value: "" };
+  t.regions.nav = [element({ querySelectorAll: () => [empty] })];
+  t.sink().event("weberl:region", region("nav", "<form></form>"));
+  assert.equal(empty.value, "");
+});
+
 test("requests go to the hub's subscription", async () => {
   const t = setup();
   assert.deepEqual(await t.sandbox.Weberl.request("save", { a: 1 }), ["save", { a: 1 }]);

@@ -9,15 +9,17 @@
 %% on two-way pages and the like are a roadmap item (see `ROADMAP.md').
 -module(weberl_form).
 
--export([open/2, open/3, csrf_input/1]).
+-export([open/2, open/3, csrf_input/1, csrf_input/2]).
 -export_type([options/0]).
 
 %% `method': `post' (default) or `get', the only methods a browser form submits;
-%% `csrf': `false' leaves the token out; `enctype': `multipart' (or any value) for uploads,
+%% `csrf': `false' leaves the token out; `fill': mark the field for the browser to fill (see
+%% {@link csrf_input/2}); `enctype': `multipart' (or any value) for uploads,
 %% see {@link open/3}; `attrs': more attributes as `[{Name, Value}]' (values escaped; names
 %% are checked).
 -type options() :: #{method => get | post,
                      csrf => boolean(),
+                     fill => boolean(),
                      enctype => multipart | iodata(),
                      attrs => [{iodata(), iodata()}]}.
 
@@ -58,7 +60,7 @@ open(Token, Action, Opts) ->
     Tag = ["<form", [[$\s, attr_name(N), "=\"", weberl_template_runtime:escape(to_bin(V)), $"]
                      || {N, V} <- Attrs], ">"],
     case {Protected, InUrl} of
-        {true, false} -> [Tag, csrf_input(Token)];
+        {true, false} -> [Tag, csrf_input(Token, maps:get(fill, Opts, false))];
         _ -> Tag
     end.
 
@@ -81,10 +83,17 @@ with_token(_Url, _) ->
 
 %% @doc `<input type="hidden" name="_csrf" value="...">'.
 -spec csrf_input(binary()) -> iodata().
-csrf_input(Token) when is_binary(Token) ->
+csrf_input(Token) ->
+    csrf_input(Token, false).
+
+%% @doc Like {@link csrf_input/1}; `true' marks the input `data-weberl-csrf', which `priv/client.js'
+%% fills (when empty) with the token of the page after a region is patched. The `{: form :}' block
+%% does this: a region re-rendered for other browsers has no token of its own.
+-spec csrf_input(binary(), boolean()) -> iodata().
+csrf_input(Token, Fill) when is_binary(Token) ->
     ["<input type=\"hidden\" name=\"", weberl_csrf:field_name(), "\" value=\"",
-     weberl_template_runtime:escape(Token), "\">"];
-csrf_input(_) ->
+     weberl_template_runtime:escape(Token), "\"", [" data-weberl-csrf" || Fill], ">"];
+csrf_input(_, _) ->
     erlang:error(badarg).
 
 absolute(<<"https://", Rest/binary>>) -> clean(Rest);

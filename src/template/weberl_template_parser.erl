@@ -42,6 +42,7 @@
               | {'case', pos_integer(), map(), [{map(), ast()}]}
               | {'for', pos_integer(), map(), ast(), none | ast()}
               | {region, pos_integer(), atom(), default | binary(), ast()}
+              | {form, pos_integer(), map(), ast()}
               | {content, pos_integer()}
               | {slot | fill, pos_integer(), atom(), ast()}.
 -type ast() :: [ast_node()].
@@ -70,6 +71,8 @@ parse(Tokens, File) ->
 %% State says which branch is being read (see `open_stmt/5').
 build([], [], Acc, _Seen) ->
     lists:reverse(Acc);
+build([], [{form, _Head, Line, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {unclosed_block, form}});
 build([], [{Kind, _State, Line, _, _} | _], _Acc, _Seen) when ?IS_STMT(Kind) ->
     throw({parse_error, Line, {unclosed_block, Kind}});
 build([], [{Kind, Name, Line, _, _} | _], _Acc, _Seen) ->
@@ -85,6 +88,25 @@ build([{content, Line} | T], Stack, Acc, Seen) ->
         [{'for', _} | _] -> throw({parse_error, Line, content_in_for});
         [{_, Name} | _] -> throw({parse_error, Line, {content_in_slot, Name}})
     end;
+%% `{: form Action [, Opts] :}' ... `{: /form :}': the head is two expressions (`action', `opts' or
+%% `none') and whether a region is open around it (`in_region': the page may be re-rendered for other
+%% browsers, see weberl_template_runtime:form_open/6). Forms do not nest.
+build([{form_open, Line, ActionText, OptsText, TextLine} | T], Stack, Acc, Seen) ->
+    case [ok || {form, _, _, _, _} <- Stack] of
+        [] -> ok;
+        _ -> throw({parse_error, Line, form_in_form})
+    end,
+    Head = #{action => expression(ActionText, TextLine),
+             opts => case OptsText of none -> none; _ -> expression(OptsText, TextLine) end,
+             in_region => lists:any(fun({K, _, _, _, _}) -> K =:= region end, Stack)},
+    build(T, [{form, Head, Line, none, Acc} | Stack], [], Seen);
+build([{form_close, Line} | _], [], _Acc, _Seen) ->
+    throw({parse_error, Line, {unexpected_block_end, form}});
+build([{form_close, _} | T], [{form, Head, Line, _, Outer} | Stack], Acc, Seen) ->
+    build(T, Stack, [{form, Line, Head, lists:reverse(Acc)} | Outer], Seen);
+build([{form_close, Line} | _], [{Open, Name, _, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {mismatched_block_end, {Open, case ?IS_STMT(Open) of true -> none; false -> Name end},
+                               {form, none}}});
 %% statements: `{: if :}', `{: case :}', `{: for :}' open a block ...
 build([{stmt, Line, Kind, Text, TextLine} | T], Stack, Acc, Seen)
   when Kind =:= 'if'; Kind =:= 'case'; Kind =:= 'for' ->
@@ -105,10 +127,12 @@ build([{stmt_end, Line, Kind} | _], [], _Acc, _Seen) ->
 build([{stmt_end, _Line, Kind} | T], [{Kind, State, OLine, _, Outer} | Stack], Acc, Seen) ->
     build(T, Stack, [finish_stmt(Kind, State, OLine, Acc) | Outer], Seen);
 build([{stmt_end, Line, Kind} | _], [{Open, Name, _, _, _} | _], _Acc, _Seen) ->
-    case ?IS_STMT(Open) of
+    case ?IS_STMT(Open) orelse Open =:= form of
         true -> throw({parse_error, Line, {mismatched_block_end, {Open, none}, {Kind, none}}});
         false -> throw({parse_error, Line, {mismatched_block_end, {Open, Name}, {Kind, none}}})
     end;
+build([{block_close, Line, Kind, Name} | _], [{form, _, _, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {mismatched_block_end, {form, none}, {Kind, Name}}});
 build([{block_close, Line, Kind, Name} | _], [{Open, _State, _, _, _} | _], _Acc, _Seen)
   when ?IS_STMT(Open) ->
     throw({parse_error, Line, {mismatched_block_end, {Open, none}, {Kind, Name}}});
@@ -243,6 +267,10 @@ scope_node({region, Line, Name, _, Children}, Env, Ctx) ->
     scope(Children, [], Ctx#{region => {Name, Line}, outer => Outer});
 scope_node({Kind, _, _, Children}, Env, Ctx) when Kind =:= slot; Kind =:= fill ->
     scope(Children, Env, Ctx);
+scope_node({form, Line, #{action := Action, opts := Opts}, Children}, Env, Ctx) ->
+    check_free(Action, Line, Env, Ctx),
+    Opts =:= none orelse check_free(Opts, Line, Env, Ctx),
+    scope(Children, Env, Ctx);
 scope_node({'if', _, Branches, Else}, Env, Ctx) ->
     lists:foreach(fun({Cond, Children}) ->
                           check_free(Cond, maps:get(line, Cond), Env, Ctx),
@@ -367,6 +395,18 @@ walk([{Kind, Line, Name, Children} | Rest], Ctx, {File, _} = Env) when Kind =:= 
         _ ->
             {error, {syntax_error, File, Line, {in_unsupported_context, Kind, Name, context_name(Ctx)}}}
     end;
+walk([{form, Line, _Head, Children} | Rest], Ctx, {File, _} = Env) ->
+    %% the tags are written here, so the form begins in text and its content has to end in text
+    case Ctx of
+        text ->
+            case walk(Children, Ctx, Env) of
+                {ok, text} -> walk(Rest, Ctx, Env);
+                {ok, _Other} -> {error, {syntax_error, File, Line, form_unbalanced_markup}};
+                {error, _} = Error -> Error
+            end;
+        _ ->
+            {error, {syntax_error, File, Line, {form_in_unsupported_context, context_name(Ctx)}}}
+    end;
 walk([{Kind, Line, _, _} = Node | Rest], Ctx, Env) when ?IS_STMT(Kind) ->
     block(Node, Kind, Line, Rest, Ctx, Env);
 walk([{'for', Line, _, _, _} = Node | Rest], Ctx, Env) ->
@@ -425,6 +465,7 @@ branches([Children | Rest], Env, Start) ->
 -spec children(ast_node()) -> [ast()].
 children({region, _, _, _, Children}) -> [Children];
 children({Kind, _, _, Children}) when Kind =:= slot; Kind =:= fill -> [Children];
+children({form, _, _, Children}) -> [Children];
 children({'if', _, Branches, Else}) ->
     [Children || {_, Children} <- Branches] ++ [Else || Else =/= none];
 children({'case', _, _, Clauses}) -> [Children || {_, Children} <- Clauses];
@@ -436,6 +477,7 @@ children(_) -> [].
 map_children(Fun, {region, Line, Name, Tag, Children}) -> {region, Line, Name, Tag, Fun(Children)};
 map_children(Fun, {Kind, Line, Name, Children}) when Kind =:= slot; Kind =:= fill ->
     {Kind, Line, Name, Fun(Children)};
+map_children(Fun, {form, Line, Head, Children}) -> {form, Line, Head, Fun(Children)};
 map_children(Fun, {'if', Line, Branches, Else}) ->
     {'if', Line, [{Cond, Fun(Children)} || {Cond, Children} <- Branches],
      case Else of none -> none; _ -> Fun(Else) end};
@@ -470,6 +512,8 @@ vars(Ast) ->
 
 %% What a node itself reads: an interpolation's expression, the heads of the blocks.
 own_assigns({expr, _, _, #{assigns := Assigns}}) -> Assigns;
+own_assigns({form, _, #{action := #{assigns := A}, opts := Opts}, _}) ->
+    A ++ case Opts of none -> []; #{assigns := OA} -> OA end;
 own_assigns({'if', _, Branches, _}) -> lists:flatmap(fun({#{assigns := A}, _}) -> A end, Branches);
 own_assigns({'case', _, #{assigns := A}, Clauses}) ->
     A ++ lists:flatmap(fun({#{assigns := CA}, _}) -> CA end, Clauses);

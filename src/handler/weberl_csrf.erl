@@ -38,7 +38,8 @@
 -module(weberl_csrf).
 
 -export([check/2, verify/1, origin_ok/1, token/1, protect/2,
-         cookie_name/0, field_name/0, header_name/0]).
+         cookie_name/0, field_name/0, header_name/0,
+         begin_request/0, render_token/0, used_token/0, finalize/1]).
 -export_type([mode/0, reason/0]).
 
 -type mode() :: true | origin | false.
@@ -208,12 +209,14 @@ token(Request) ->
 %% of its action, see {@link weberl_form:open/3}).
 -spec protect(weberl_request:t(), fun((binary()) -> weberl_response:t())) -> weberl_response:t().
 protect(Request, Build) when is_function(Build, 1) ->
-    {Token, Known} = case current(Request) of
-                         {ok, T} -> {T, true};
-                         error -> {fresh(), false}
-                     end,
-    Response = Build(Token),
-    WithCookie = case Known of
+    {Token, _Known} = request_token(Request),
+    mark(Build(Token), Token, request_known(Request)).
+
+%% The token and the headers it needs: the cookie when the browser has none, `cache-control: private,
+%% no-store' and `referrer-policy: same-origin' unless the response set its own. A cookie the response
+%% already sets (`protect/2' ran, then `finalize/1') is not added twice.
+mark(Response, Token, Known) ->
+    WithCookie = case Known orelse sets_cookie(Response) of
                      true -> Response;
                      false -> weberl_response:set_cookie(Response, cookie_name(), Token, cookie_options())
                  end,
@@ -226,6 +229,72 @@ protect(Request, Build) when is_function(Build, 1) ->
     case weberl_response:header(Cached, <<"referrer-policy">>) of
         error -> weberl_response:with_header(Cached, <<"referrer-policy">>, <<"same-origin">>);
         {ok, _} -> Cached
+    end.
+
+sets_cookie(Response) ->
+    Prefix = <<(cookie_name())/binary, "=">>,
+    lists:any(fun(V) -> binary:longest_common_prefix([V, Prefix]) =:= byte_size(Prefix) end,
+              weberl_response:header_values(Response, <<"set-cookie">>)).
+
+%% ---------------------------------------------------------------------
+%% The token of the request being served
+%%
+%% A `{: form :}' block in a template needs the token while the handler renders, and the
+%% response that comes out needs the cookie and the headers. The first use in a request
+%% remembers the token (so a fresh one is made once, however many forms the page has);
+%% dispatch calls `begin_request/0' before the handler and `finalize/1' after it.
+
+-define(USED, '$weberl_csrf_token').
+
+%% @doc Forget the token of an earlier request (dispatch, before the handler).
+-spec begin_request() -> ok.
+begin_request() ->
+    _ = erlang:erase(?USED),
+    ok.
+
+%% {Token, Known}: the cookie's token (Known) or a fresh one, remembered for this request.
+request_token(Request) ->
+    case erlang:get(?USED) of
+        {Request, Token, Known} ->
+            {Token, Known};
+        _ ->
+            {Token, Known} = case current(Request) of
+                                 {ok, T} -> {T, true};
+                                 error -> {fresh(), false}
+                             end,
+            _ = erlang:put(?USED, {Request, Token, Known}),
+            {Token, Known}
+    end.
+
+request_known(Request) ->
+    {_, Known} = request_token(Request),
+    Known.
+
+%% @doc The token for a form being rendered by the running handler (the request is the
+%% ambient one, see `weberl_session'), `none' when there is no request (a region rendered
+%% for the browsers of a topic, a render outside dispatch).
+-spec render_token() -> {ok, binary()} | none.
+render_token() ->
+    case weberl_session:ambient() of
+        {ok, Request} -> {Token, _} = request_token(Request), {ok, Token};
+        none -> none
+    end.
+
+%% @doc The token this request's page used, if it used one.
+-spec used_token() -> {ok, binary()} | none.
+used_token() ->
+    case erlang:get(?USED) of
+        {_Request, Token, _Known} -> {ok, Token};
+        _ -> none
+    end.
+
+%% @doc Dispatch, after the handler: a response that carried a token gets the cookie (when the
+%% browser had none) and the headers of {@link protect/2}.
+-spec finalize(weberl_response:t()) -> weberl_response:t().
+finalize(Response) ->
+    case erlang:erase(?USED) of
+        {_Request, Token, Known} -> mark(Response, Token, Known);
+        _ -> Response
     end.
 
 %% Session cookie: the token lives as long as the browser session.

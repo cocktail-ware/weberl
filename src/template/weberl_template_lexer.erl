@@ -47,6 +47,8 @@
                | {stmt, pos_integer(), 'if' | elif | 'case' | 'of' | 'for' | 'else' | empty,
                   binary() | none, pos_integer()}
                | {stmt_end, pos_integer(), 'if' | 'case' | 'for'}
+               | {form_open, pos_integer(), binary(), binary() | none, pos_integer()}
+               | {form_close, pos_integer()}
                | {content, pos_integer()}.
 
 -spec tokenize(binary(), file:filename_all()) ->
@@ -138,6 +140,8 @@ statement(Trimmed, Content, Line) ->
         <<"of">> -> with_text('of', Rest, Line, TextLine);
         <<"for">> -> with_text('for', Rest, Line, TextLine);
         <<"json">> -> json_tag(Rest, Line);
+        <<"form">> -> form_tag(Rest, Line, TextLine);
+        <<"/form">> -> form_close(Rest, Content, Line);
         <<"else">> -> bare('else', Rest, Content, Line);
         <<"empty">> -> bare(empty, Rest, Content, Line);
         <<"/if">> -> closer('if', Rest, Content, Line);
@@ -158,6 +162,33 @@ json_tag(Rest, Line) ->
     case string:trim(Rest, both, " \t\r\n") of
         <<>> -> throw({lex_error, Line, {missing_expression, json}});
         _ -> {ok, {interp, Line, json, Rest}}
+    end.
+
+%% `{: form Action :}' / `{: form Action, Opts :}': the head is one or two Erlang expressions separated
+%% by the first comma outside brackets and strings.
+form_tag(Rest, Line, TextLine) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> ->
+            throw({lex_error, Line, {missing_expression, form}});
+        _ ->
+            case weberl_blocks_expr:tag_end(Rest, <<",">>) of
+                {ok, Pos} ->
+                    Action = binary:part(Rest, 0, Pos),
+                    Opts = binary:part(Rest, Pos + 1, byte_size(Rest) - Pos - 1),
+                    string:trim(Action, both, " \t\r\n") =/= <<>> andalso string:trim(Opts, both, " \t\r\n") =/= <<>>
+                        orelse throw({lex_error, Line, {missing_expression, form}}),
+                    {ok, {form_open, Line, Action, Opts, TextLine}};
+                {error, unterminated} ->
+                    {ok, {form_open, Line, Rest, none, TextLine}};
+                {error, Error} ->
+                    tag_error(Error, Line)
+            end
+    end.
+
+form_close(Rest, Content, Line) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> -> {ok, {form_close, Line}};
+        _ -> throw({lex_error, Line, {invalid_block_tag, Content}})
     end.
 
 bare(Kind, Rest, Content, Line) ->

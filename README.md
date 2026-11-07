@@ -553,6 +553,37 @@ token), `method => get` never carries one, `enctype` and `attrs` add attributes 
 `Action` that is not a path on this site or an `http(s)` URL raises. `weberl_form:csrf_input/1` is just
 the input. Scripts read the token from the form field or from the page and send `x-csrf-token`.
 
+**In a template, `{: form :}` does all of this.** It opens and closes the form, writes the `_csrf` field and
+takes the token of the request being served, so a view needs no `protect/2` and no `{{{ @form }}}`:
+
+```html
+{: form weberl_url:router_path("/login") :}
+  <input name="user"> <button>Log in</button>
+{: /form :}
+
+{: form weberl_url:router_path("/search"), #{method => get} :} ... {: /form :}
+{: form weberl_url:router_path("/avatar"), #{enctype => multipart, attrs => [{"class", "up"}]} :} ... {: /form :}
+```
+
+- The head is `Action` or `Action, Options`. The action is a [`weberl_url`](#links) value, checked like a link
+  (`router_path` is verified when the router starts; a bare string is `untagged_url`). The options are the map of
+  `weberl_form:open/3`: `method`, `enctype`, `attrs`, `csrf`; anything else is `{bad_form_options, ...}`.
+- The token is the running handler's (the request is ambient while it renders, as for the session functions).
+  After the handler returns, dispatch sets the cookie when the browser has none and adds `cache-control:
+  private, no-store` and `referrer-policy: same-origin` unless the response has them; a page without a form gets
+  none of that. Several forms (a layout's log-out form and the page's own) share one token. `protect/2` still
+  works and shares it with the block.
+- A form stands in HTML text and its content has to end in text (`{form_in_unsupported_context, Where}`,
+  `form_unbalanced_markup`); forms do not nest (`form_in_form`); the close tag has to match
+  (`{unclosed_block, form}`, `{unexpected_block_end, form}`, `{mismatched_block_end, ...}`).
+- **In a region.** A region that the server re-renders for other pages (`update/3`, `update_topic/4,5`) has no
+  request, and one rendering goes to many browsers. A form there is written with an empty field marked
+  `data-weberl-csrf`, and the beacon fills it, after every patch, with the page's token (it is the
+  `data-weberl-csrf` attribute of the beacon's `<script>`, present when the page rendered a form). The
+  first full render of the page, which has the request, writes the real token. A multipart form cannot be filled
+  later (its token is in the action), so in a region without a request it raises `{csrf_token_unavailable, View, Line}`,
+  like any form rendered outside a request (a unit test: render inside `weberl_session:run/2` with a request).
+
 Set `{secure_cookies, true}` in production (HTTPS): the cookie is then `Secure` and named
 `__Host-weberl_csrf`, which browsers refuse to let a sibling subdomain overwrite. Without it a cookie
 planted by a sibling subdomain is still rejected because it lacks our MAC, but the attacker can pair

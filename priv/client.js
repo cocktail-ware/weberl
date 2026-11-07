@@ -33,6 +33,11 @@
  * ("weberl:ready" fires once, after window.Weberl is set; Weberl.ready(fn) is the
  * same for code that already has Weberl: it calls fn(Weberl) at once.)
  *
+ * Forms in regions: a {: form :} that the server re-renders (update/3, update_topic/4,5) has no
+ * token, so its field comes empty and marked data-weberl-csrf; the beacon fills it, after each patch,
+ * with the page's token (the data-weberl-csrf attribute of its script tag, set when the page
+ * rendered a form).
+ *
  * Regions: the server can re-render a region of the page (weberl_live:update/3,
  * update_topic/4); the beacon swaps the content of <weberl-region name="x"> /
  * [data-weberl-region="x"] and dispatches "weberl:region" on document (detail:
@@ -142,6 +147,7 @@
       end: active.selectionEnd
     } : null;
     el.innerHTML = html;
+    fillTokens(el);
     if (keep) {
       var again = document.getElementById(keep.id);
       if (again) {
@@ -150,6 +156,19 @@
           try { again.setSelectionRange(keep.start, keep.end); } catch (e) { /* not a text field */ }
         }
       }
+    }
+  }
+
+  // A form in a region that the server re-renders has no CSRF token of its own (the render is
+  // shared by many browsers, `{: form :}' leaves the field empty and marked data-weberl-csrf).
+  // The page carries its token on this script tag; the empty fields get it.
+  var csrfToken = script.getAttribute("data-weberl-csrf");
+
+  function fillTokens(root) {
+    if (!csrfToken || !root.querySelectorAll) { return; }
+    var fields = root.querySelectorAll("input[data-weberl-csrf]");
+    for (var i = 0; i < fields.length; i++) {
+      if (!fields[i].value) { fields[i].value = csrfToken; }
     }
   }
 
