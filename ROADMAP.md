@@ -80,6 +80,16 @@ specification; kept here so they don't clutter active work.
   the same `weberl_topics/1` / `handle_subscribe/2` in six views. Sketched, not decided: (1) a router option
   `route_defaults` that each route's own options narrow key by key; (2) a router-level module that supplies the two
   callbacks to live views without their own (the route map already carries the view's `handler`). Nothing is built.
+- **Route scopes (idea, not a design).** In a declarative router, group routes under a shared base path and shared
+  options: `{scope, "/base/path", DefaultOpts, [Routes]}`, where `Routes` are the usual `{Path, Handler[, Opts]}`
+  entries (and possibly nested scopes). The path of each route is prefixed with the base; `DefaultOpts` are the
+  route options every route of the group gets (`live`, `layout`, `layouts`, `csrf`, `limits`, ...), so a group of live
+  pages needs no repeated options. Open questions are the merge rules: route options narrow the scope's key by key
+  (as the `route_defaults` sketch above), `limits` merge map-wise or replace, nested scopes stack their prefixes and
+  merge outward in, `data` and `layout => none` need to be able to reset a default, and what an option the scope
+  and the route both set means for list values such as `layouts`. It would overlap with the router-level
+  `route_defaults` and with `filesystem_router` prefixes; decide the three together. Names and shape here are only
+  to remember what it is about.
 
 ## Components
 - File components (`components` directories, `{: component name, Params :} ... {: /component :}`, inlined at
