@@ -15,13 +15,13 @@
 %% `method': `post' (default) or `get', the only methods a browser form submits;
 %% `csrf': `false' leaves the token out; `fill': mark the field for the browser to fill (see
 %% {@link csrf_input/2}); `enctype': `multipart' (or any value) for uploads,
-%% see {@link open/3}; `attrs': more attributes as `[{Name, Value}]' (values escaped; names
-%% are checked).
+%% see {@link open/3}; `attrs': more attributes as `[{Name, Value}]' (values escaped, an integer is written
+%% in decimal; names are checked).
 -type options() :: #{method => get | post,
                      csrf => boolean(),
                      fill => boolean(),
                      enctype => multipart | iodata(),
-                     attrs => [{iodata(), iodata()}]}.
+                     attrs => [{iodata(), iodata() | integer()}]}.
 
 -spec open(binary() | undefined, iodata()) -> iodata().
 open(Token, Action) ->
@@ -57,7 +57,7 @@ open(Token, Action, Opts) ->
              end,
     Attrs = [{<<"method">>, atom_to_binary(Method)}, {<<"action">>, Target}]
         ++ [{<<"enctype">>, Enctype} || Enctype =/= undefined] ++ maps:get(attrs, Opts, []),
-    Tag = ["<form", [[$\s, attr_name(N), "=\"", weberl_template_runtime:escape(to_bin(V)), $"]
+    Tag = ["<form", [[$\s, attr_name(N), "=\"", weberl_template_runtime:escape(attr_value(V)), $"]
                      || {N, V} <- Attrs], ">"],
     case {Protected, InUrl} of
         {true, false} -> [Tag, csrf_input(Token, maps:get(fill, Opts, false))];
@@ -113,5 +113,8 @@ attr_name(Name) ->
 
 name_char(C) when C >= $a, C =< $z; C >= $A, C =< $Z; C >= $0, C =< $9 -> true;
 name_char(C) -> C =:= $- orelse C =:= $_ orelse C =:= $:.
+
+attr_value(V) when is_integer(V) -> integer_to_binary(V);
+attr_value(V) -> iolist_to_binary(V).
 
 to_bin(V) -> iolist_to_binary(V).

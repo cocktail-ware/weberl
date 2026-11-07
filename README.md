@@ -549,7 +549,7 @@ handle(Request) ->
 in a URL) unless the handler set them. In the template, `{{{ @form }}}`
 inserts the helper's HTML. `weberl_form:open(Token, Action[, Opts])` returns `<form method="post"
 action="...">` plus the hidden `_csrf` input; `#{csrf => false}` leaves the input out (and needs no
-token), `method => get` never carries one, `enctype` and `attrs` add attributes (escaped), and an
+token), `method => get` never carries one, `enctype` and `attrs` add attributes (escaped; a value may be an integer), and an
 `Action` that is not a path on this site or an `http(s)` URL raises. `weberl_form:csrf_input/1` is just
 the input. Scripts read the token from the form field or from the page and send `x-csrf-token`.
 
