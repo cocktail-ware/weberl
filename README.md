@@ -299,6 +299,25 @@ Naming rules:
   `? # \`, and no `:` or `*`). A directory named `[name]` is a [route
   parameter](#route-parameters).
 
+### Route data
+
+A route can carry data of its own, set in the code: `data => Term` in its options, any term. The handler
+reads it with `weberl_request:route_data(Request)` (`#{}` when the route has none). Unlike a
+[parameter](#route-parameters), the client cannot vary it, so one handler module can serve several routes
+and tell them apart:
+
+```erlang
+{"/nodes/update", node_actions, #{data => #{action => update}}},      %% declarative
+{"/nodes/delete", node_actions, #{data => #{action => delete}}},
+
+handle(Request) ->
+    #{action := Action} = weberl_request:route_data(Request),
+    ...
+```
+
+In a view: `-weberl_route(#{data => #{action => update}}).` Only the route itself carries data; the
+router's options have no default for it.
+
 ### Route parameters
 
 A segment can be a parameter: `:id` in a declarative path, a directory `[id]` in the filesystem.

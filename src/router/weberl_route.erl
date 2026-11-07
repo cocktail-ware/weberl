@@ -5,7 +5,7 @@
 -module(weberl_route).
 
 -export([new/4, new/5, path/1, handler/1, origin/1, source/1, opts/1, live/1, session/1, csrf/1, layout/1,
-         layouts/1, limits/1,
+         layouts/1, limits/1, data/1,
          normalize_path/1, check_opts/1, check_live/1,
          normalize_pattern/1, pattern_parts/1, is_dynamic/1, shape/1, request_segments/1, decode_segment/1]).
 -export_type([t/0, origin/0, path/0, live/0, opts/0]).
@@ -20,7 +20,8 @@
 %% (no process per page; it only receives the topics of its handler, see
 %% `weberl_live'); default `true'.
 -type opts() :: #{live => live(), session => boolean(), csrf => true | origin | false,
-                  layout => atom(), layouts => [atom()] | all, limits => weberl_limits:limits()}.
+                  layout => atom(), layouts => [atom()] | all, limits => weberl_limits:limits(),
+                  data => term()}.
 
 -record #route{
     path    :: path(),
@@ -95,13 +96,19 @@ csrf(#route{opts = O}) -> maps:get(csrf, O, true).
 -spec limits(t()) -> weberl_limits:limits().
 limits(#route{opts = O}) -> maps:get(limits, O, #{}).
 
+%% @doc The data the route carries (`data => Term' in its options, any term), `#{}' when none.
+%% Set by the route's author, so unlike a path parameter the client cannot vary it; the handler
+%% reads it with `weberl_request:route_data/1'.
+-spec data(t()) -> term().
+data(#route{opts = O}) -> maps:get(data, O, #{}).
+
 %% @doc Validate a route options map. The keys are `live', `session', `csrf',
-%% `layout' (an atom), `layouts' (a list of atoms or `all') and `limits' (a map, see `weberl_limits'); a session-less page has to
+%% `layout' (an atom), `layouts' (a list of atoms or `all') and `limits' (a map, see `weberl_limits') and `data' (any term); a session-less page has to
 %% be live.
 -spec check_opts(term()) -> {ok, opts()} | {error, term()}.
 check_opts(Opts) when is_map(Opts) ->
     case [K || K <- maps:keys(Opts), K =/= live, K =/= session, K =/= csrf, K =/= layout, K =/= layouts,
-               K =/= limits] of
+               K =/= limits, K =/= data] of
         [] ->
             Checks = [check_kind(Opts), check_session(Opts), check_csrf(Opts), check_layout(Opts),
                       check_layouts(Opts), check_limits(Opts)],

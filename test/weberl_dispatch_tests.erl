@@ -131,3 +131,18 @@ mute() ->
 
 unmute(Old) ->
     logger:set_primary_config(level, maps:get(level, Old)).
+
+route_data_test() ->
+    H = load("data", "handle(R) -> weberl_response:text(200, "
+                     "atom_to_binary(maps:get(action, weberl_request:route_data(R), none)))."),
+    Upd = weberl_route:new("/update", H, declarative, router, #{data => #{action => update}}),
+    Del = weberl_route:new("/delete", H, declarative, router, #{data => #{action => delete}}),
+    Plain = weberl_route:new("/plain", H, declarative, router),
+    {ok, T} = weberl_table:assemble([], [Upd, Del, Plain]),
+    Body = fun(P) -> weberl_response:body(weberl_dispatch:dispatch(req(P), T)) end,
+    ?assertEqual(<<"update">>, Body("/update")),
+    ?assertEqual(<<"delete">>, Body("/delete")),
+    ?assertEqual(<<"none">>, Body("/plain")),
+    %% a request that did not come through dispatch has none
+    ?assertEqual(#{}, weberl_request:route_data(req("/x"))),
+    ?assertEqual({ok, #{data => {any, [term]}}}, weberl_route:check_opts(#{data => {any, [term]}})).

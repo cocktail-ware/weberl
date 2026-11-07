@@ -26,7 +26,7 @@
          method/1, path/1, headers/1, header/2, query/1, query_params/1,
          params/1, peer/1, meta/1, read_body/1, cookies/1, cookie/2, form/1, form/2, multipart/1, multipart/2,
          files/1, files/2, is_multipart/1, safe_filename/1, session/1, session_get/2,
-         page/1, with_page/2, with_params/2, route/1, limits/1, with_route/2]).
+         page/1, with_page/2, with_params/2, route/1, limits/1, route_data/1, with_route/2]).
 -export_type([t/0]).
 -export_record([request]).
 
@@ -43,7 +43,7 @@
     page = undefined :: undefined | binary(),
     %% What dispatch knows of the route that matched: `handler' and the `limits' in force
     %% for it (route over router), see `weberl_limits'. Empty for a hand-made request.
-    route = #{} :: #{handler => module(), limits => weberl_limits:limits()}
+    route = #{} :: #{handler => module(), limits => weberl_limits:limits(), data => term()}
 }.
 
 -type t() :: #request{}.
@@ -248,7 +248,7 @@ multipart_type(R) ->
             false
     end.
 
-%% @doc What dispatch knows of the matched route: `#{handler, limits}' (`#{}' for a request
+%% @doc What dispatch knows of the matched route: `#{handler, limits, data}' (`#{}' for a request
 %% that did not come through dispatch).
 -spec route(t()) -> map().
 route(#request{route = Route}) -> Route.
@@ -257,7 +257,14 @@ route(#request{route = Route}) -> Route.
 -spec limits(t()) -> weberl_limits:limits().
 limits(#request{route = Route}) -> maps:get(limits, Route, #{}).
 
-%% @doc The request with the route information dispatch sets (`handler', `limits').
+%% @doc The data the matched route carries (`data => Term' in its options: `{Path, Handler,
+%% #{data => #{action => update}}}' or `-weberl_route(#{data => ...}).'), `#{}' when it has none.
+%% It is set in the code, not by the client, so one handler module can serve several routes and
+%% tell them apart without a path parameter anyone could change.
+-spec route_data(t()) -> term().
+route_data(#request{route = Route}) -> maps:get(data, Route, #{}).
+
+%% @doc The request with the route information dispatch sets (`handler', `limits', `data').
 -spec with_route(t(), map()) -> t().
 with_route(#request{} = R, Route) when is_map(Route) -> R#request{route = Route}.
 
