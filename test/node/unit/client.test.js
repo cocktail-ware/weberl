@@ -38,6 +38,7 @@ function setup(attributes = {}, { engine = true } = {}) {
 
   const regions = {};            // name -> [elements]
   const documentEvents = [];
+  const startup = [];            // the "weberl:ready" event, kept apart from the rest
   const windowListeners = {};
   const elements = {};           // id -> element (for getElementById)
   const defined = {};
@@ -48,7 +49,7 @@ function setup(attributes = {}, { engine = true } = {}) {
     querySelector: (sel) => (sel === "script[data-weberl-page]" ? script : null),
     querySelectorAll: (sel) => regions[/name="([^"]+)"/.exec(sel)[1]] || [],
     getElementById: (id) => elements[id] || null,
-    dispatchEvent: (ev) => documentEvents.push(ev),
+    dispatchEvent: (ev) => (ev.type === "weberl:ready" ? startup : documentEvents).push(ev),
   };
 
   const sandbox = {
@@ -74,6 +75,7 @@ function setup(attributes = {}, { engine = true } = {}) {
     elements, defined, errors, warnings, document,
     sink: () => subscribed[0].sink,
     types: () => documentEvents.map((e) => e.type),
+    startup,
   };
 }
 
@@ -111,6 +113,30 @@ test("the hub's state is reported as events and kept on Weberl", () => {
   t.sink().closed("closed");
   assert.deepEqual(t.types(), ["weberl:transport", "weberl:connected", "weberl:closed"]);
   return assert.rejects(t.sandbox.Weberl.request("x", 1), /weberl closed/);
+});
+
+test("state() tells connecting, connected and closed", () => {
+  const t = setup();
+  assert.equal(t.sandbox.Weberl.state(), "connecting");
+  t.sink().transport("sse");
+  assert.equal(t.sandbox.Weberl.state(), "connecting");
+  t.sink().connected("sse");
+  assert.equal(t.sandbox.Weberl.state(), "connected");
+  t.sink().closed("closed");
+  assert.equal(t.sandbox.Weberl.state(), "closed");
+});
+
+test("weberl:ready fires once Weberl exists; ready(fn) calls at once", () => {
+  const t = setup();
+  assert.deepEqual(t.startup.map((e) => e.type), ["weberl:ready"]);
+  const seen = [];
+  t.sandbox.Weberl.ready((w) => seen.push(w === t.sandbox.Weberl));
+  assert.deepEqual(seen, [true]);
+});
+
+test("without the engine there is no ready event either", () => {
+  const t = setup({}, { engine: false });
+  assert.deepEqual(t.startup, []);
 });
 
 test("requests go to the hub's subscription", async () => {

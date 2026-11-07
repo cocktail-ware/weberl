@@ -19,6 +19,15 @@
  * "weberl:connected" (detail: transport), "weberl:transport" and
  * "weberl:closed" (detail: reason) report the state).
  *
+ * State and start-up: Weberl.state() is "connecting" (until the first connection is
+ * up), "connected" or "closed" (ended for good). This script is inserted before the
+ * last </body>, so a script of the layout (even with defer) runs BEFORE it and
+ * window.Weberl does not exist yet. Such a script waits for the document event:
+ *   if (window.Weberl) { start(); }
+ *   else { document.addEventListener("weberl:ready", start, { once: true }); }
+ * ("weberl:ready" fires once, after window.Weberl is set; Weberl.ready(fn) is the
+ * same for code that already has Weberl: it calls fn(Weberl) at once.)
+ *
  * Regions: the server can re-render a region of the page (weberl_live:update/3,
  * update_topic/4); the beacon swaps the content of <weberl-region name="x"> /
  * [data-weberl-region="x"] and dispatches "weberl:region" on document (detail:
@@ -59,6 +68,7 @@
   var handlers = {};
   var transport = null;
   var done = false;
+  var connected = false;
 
   // topic is set for events published to a topic (undefined for the page's own
   // events and for snapshots).
@@ -154,7 +164,7 @@
   });
   var sub = hub.subscribe(page, {
     event: onEvent,
-    connected: function (name) { emit("connected", name); },
+    connected: function (name) { connected = true; emit("connected", name); },
     transport: function (name) { transport = name; emit("transport", name); },
     closed: function (reason) { done = true; emit("closed", reason); }
   });
@@ -169,6 +179,14 @@
     request: function (name, data) {
       return done ? Promise.reject(new Error("weberl closed")) : sub.request(name, data);
     },
-    close: function () { sub.close(); }
+    close: function () { sub.close(); },
+    // "connecting" until the first connection is up, "connected" while the page
+    // receives, "closed" once it ended for good (the hub reconnects by itself
+    // after a drop and does not report the gap).
+    state: function () { return done ? "closed" : connected ? "connected" : "connecting"; },
+    // Runs fn(Weberl) now. Scripts that may run before this one (a layout script
+    // with defer) cannot call it: they listen for "weberl:ready" instead, see above.
+    ready: function (fn) { fn(window.Weberl); }
   };
+  document.dispatchEvent(new CustomEvent("weberl:ready"));
 })();

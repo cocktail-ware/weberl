@@ -1252,7 +1252,21 @@ tick(PageId) ->
 
 In the browser the beacon turns each event into a `weberl:<name>` `CustomEvent` on
 `document` (`detail` is the data), and `Weberl.on(name, fn)` registers a callback.
-`weberl:connected`, `weberl:transport` and `weberl:closed` report the connection state.
+`weberl:connected`, `weberl:transport` and `weberl:closed` report the connection state, and
+`Weberl.state()` answers it at any time: `"connecting"` (until the first connection is up), `"connected"` or
+`"closed"` (ended for good; the hub reconnects by itself after a drop and does not report the gap).
+
+The beacon is inserted before the last `</body>`, so a script of your layout, even with `defer`, runs
+before it and `window.Weberl` does not exist yet. Such a script waits for the `weberl:ready` document event
+(fired once, after `window.Weberl` is set):
+
+```js
+if (window.Weberl) { start(); }
+else { document.addEventListener("weberl:ready", start, { once: true }); }
+```
+
+`Weberl.ready(fn)` calls `fn(Weberl)` at once, for code that already holds `Weberl`. The names `ready`,
+`connected`, `transport`, `closed` and `stale` are used by Weberl itself: do not publish events with them.
 See `example/src/views/clock/`.
 
 ### Requests from the page
