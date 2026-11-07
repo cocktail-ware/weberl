@@ -1127,8 +1127,8 @@ single-file static mounts, per-listener live timeouts, `Last-Event-ID` replay.
 
 ## How to work
 
-- Sandbox: `podman run -d --name weberl-dev -p 8080:8080 -v "$(pwd):/app:Z" -w /app weberl sleep infinity`
-  (image `weberl`, OTP 29.1.2, rebar3 3.27, no Node; `-p 8080:8080` so the example is
+- Sandbox: `podman run -d --name weberl-dev -p 8080 -v "$(pwd):/app:Z" -w /app weberl sleep infinity`
+  (image `weberl`, OTP 29.1.2, rebar3 3.27, no Node; `-p 8080` (random host port: `podman port weberl-dev 8080`) so the example is
   reachable from the user's browser). The container may be gone; check
   `podman ps -a`. Run `podman exec weberl-dev rebar3 eunit` (add `--module=Name`
   for one module; it takes ~1-2 minutes). If a command seems to hang at "Verifying

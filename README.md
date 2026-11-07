@@ -1676,7 +1676,7 @@ changes the count region, a process updates the clock region every second with
 provided Dockerfile (`podman build -t weberl .`):
 
 ```text
-podman run -it -p 8080:8080 -v "$(pwd):/app:Z" -w /app/example weberl rebar3 shell
+podman run -it -p 8080 -v "$(pwd):/app:Z" -w /app/example weberl rebar3 shell
 ```
 
 The example gets weberl through `example/_checkouts/weberl`, a symlink to the
@@ -1725,11 +1725,11 @@ Erlang/OTP 29 and rebar3. With the provided Dockerfile:
 
 ```text
 podman build -t weberl .
-podman run -d --name weberl-dev -p 8080:8080 -v "$(pwd):/app:Z" -w /app weberl sleep infinity
+podman run -d --name weberl-dev -p 8080 -v "$(pwd):/app:Z" -w /app weberl sleep infinity
 podman exec weberl-dev rebar3 eunit
 ```
 
-(`-p 8080:8080` makes the example app reachable from your browser.)
+(`-p 8080` publishes the example app on a free host port, so a busy 8080 never blocks the container; `podman port weberl-dev 8080` shows it. Use `-p 8080:8080` for a fixed port.)
 
 `rebar3 eunit` runs everything, including real HTTP tests against Roadrunner on
 ephemeral ports (Roadrunner is fetched for the test profile only). The Erlang image has no
