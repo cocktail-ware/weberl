@@ -111,7 +111,7 @@ part({expr, Line, escaped, #{form := Form, url := #{policy := Policy, position :
      [Value, {atom, Line, View}, {integer, Line, Line},
       erl_parse:abstract({Policy, Position}, Line)]};
 part({expr, Line, Mode, #{form := Form, source := Source}}, View) ->
-    Fun = case Mode of escaped -> escaped; raw -> raw end,
+    Fun = case Mode of escaped -> escaped; raw -> raw; json_script -> json_script; json_attr -> json_attr end,
     Value = weberl_blocks_expr:render(Form, hooks(View)),
     {call, Line, {remote, Line, {atom, Line, weberl_template_runtime}, {atom, Line, Fun}},
      [Value, {atom, Line, View}, erl_parse:abstract(Source, Line)]};

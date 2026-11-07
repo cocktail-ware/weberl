@@ -788,6 +788,33 @@ The URL attributes (`href`, `src`, `action`, `formaction`, `poster`, `cite`,
 `xlink:href`) take interpolation too, but only a value made by `weberl_url`: see
 [Links](#links).
 
+### Data for scripts: `{: json :}`
+
+To hand a value to JavaScript, use `{: json Expr :}` instead of building a string: it takes an Erlang
+expression like `{{ }}` and writes it as JSON (`json:encode/1`: maps, lists, binaries, numbers, `true`,
+`false`, `null`; other atoms as strings). It stands in two places only:
+
+```html
+<script type="application/json" id="state">{: json @state :}</script>
+<script>const state = JSON.parse(document.getElementById("state").textContent);</script>
+
+<div data-state="{: json #{user => @user, count => length(@items)} :}"></div>
+```
+
+- **A data script**: `<script type="application/json">`, `application/ld+json`, `importmap`,
+  `speculationrules` or any `application/*+json` (quote the `type`; the first `type` wins). `<`, `>`, `&` and
+  U+2028/9 are written as `\uXXXX`, so no value can close the script, open a comment or end a line; it still
+  parses to exactly what was given. Not in `<script>` that runs code: JavaScript has contexts (strings,
+  comments) a template cannot see, so there `{: json :}` is `{json_not_allowed_here, <<"script">>}`.
+  `{{ }}` stays refused in every script.
+- **A quoted attribute value** that takes plain text: the JSON is HTML-escaped (`JSON.parse(el.dataset.state)`).
+  Not in URL attributes, `style`, `on*`, ...: `{json_not_allowed_here, Attr}`; not in text.
+- The `type` of a `<script>` is read as literal text: `{{ }}` or a block in it is an error
+  (`{interpolation_in_restricted_attribute, <<"type">>}`), because it decides what the content is.
+- A value JSON cannot hold (a pid, a tuple) raises `{template_error, {unsupported_value, View, Source, Value}}`
+  when the page renders.
+- Live pages: `{: json :}` inside a region is re-rendered with it, like any interpolation.
+
 ### Links
 
 HTML escaping makes a value safe in an attribute, not in a URL: `javascript:alert(1)` survives it, and an

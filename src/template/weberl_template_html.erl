@@ -14,7 +14,8 @@
 %% </ul>
 -module(weberl_template_html).
 
--export([initial/0, advance/2, check/2, url_attribute/1, url_policy/2, block_context/1, branch_end_ok/2]).
+-export([initial/0, advance/2, check/2, url_attribute/1, url_policy/2, block_context/1, branch_end_ok/2,
+         base_tag/1, json_context/1]).
 -export_type([ctx/0, policy/0]).
 
 %% What a URL attribute of an element accepts (HANDOFF decision 8): `web' a path on
@@ -43,8 +44,16 @@ initial() -> text.
 advance(Bin, Ctx) -> step(Bin, Ctx).
 
 %% @doc May an interpolation of the given mode appear in this context?
--spec check(ctx(), escaped | raw) -> ok | {error, term()}.
+-spec check(ctx(), escaped | raw | json) -> ok | {error, term()}.
+%% `{: json :}' (see json_context/1): only in a data script and in an attribute value
+check(Ctx, json) ->
+    case json_context(Ctx) of
+        none -> {error, {json_not_allowed_here, context_word(Ctx)}};
+        _ -> ok
+    end;
 check(text, _) -> ok;
+%% the type of a script decides what its content is: it stays literal
+check({value, _, _, {type, _}}, _) -> {error, {interpolation_in_restricted_attribute, <<"type">>}};
 check({value, _, _, Attr}, Mode) ->
     case {Mode, restricted(Attr)} of
         {raw, _} -> {error, {raw_interpolation_in_attribute, Attr}};
@@ -53,7 +62,7 @@ check({value, _, _, Attr}, Mode) ->
         _ -> ok
     end;
 check(comment, _) -> unsupported(comment);
-check({raw_text, Tag}, _) -> unsupported(Tag);
+check({raw_text, Tag}, _) -> unsupported(base_tag(Tag));
 check({unquoted, _, _}, _) -> unsupported(unquoted_attribute);
 check({before_value, _, _}, _) -> unsupported(unquoted_attribute);
 check(declaration, _) -> unsupported(declaration);
@@ -80,6 +89,7 @@ block_context({in_tag, _}) -> tag;
 %% after a finished attribute name and white space (`<input disabled {: if ... :}'): the next thing is a
 %% new attribute
 block_context({after_attr_name, _, _}) -> tag;
+block_context({value, _, _, {type, _}}) -> {error, {block_in_restricted_attribute, <<"type">>}};
 block_context({value, _, _, Attr}) ->
     case restricted(Attr) orelse url_attribute(Attr) of
         true -> {error, {block_in_restricted_attribute, Attr}};
@@ -111,7 +121,8 @@ url_attribute(Attr) ->
 %% what every link means (`script', `iframe', `embed', `frame', `base', `link', and `use',
 %% which pulls in another document) take paths on this site only.
 -spec url_policy(binary(), binary()) -> policy().
-url_policy(Tag, <<"src">>) when Tag =:= <<"script">>; Tag =:= <<"iframe">>;
+url_policy(<<"script", _/binary>>, <<"src">>) -> local_only;
+url_policy(Tag, <<"src">>) when Tag =:= <<"iframe">>;
                                 Tag =:= <<"embed">>; Tag =:= <<"frame">> -> local_only;
 url_policy(Tag, <<"href">>) when Tag =:= <<"base">>; Tag =:= <<"link">>; Tag =:= <<"use">> -> local_only;
 url_policy(<<"use">>, <<"xlink:href">>) -> local_only;
@@ -156,9 +167,14 @@ step(<<$/, R/binary>>, {after_attr_name, T, _}) -> step(R, {in_tag, T});
 step(<<C, R/binary>>, {after_attr_name, T, _}) -> step(R, {attr_name, T, <<(lower(C))>>});
 %% attribute value
 step(<<C, R/binary>>, {before_value, T, A}) when ?WS(C) -> step(R, {before_value, T, A});
+%% the type of a <script> (first one wins, like in a browser) decides whether its content is data
+step(<<Q, R/binary>>, {before_value, <<"script">> = T, <<"type">>}) when Q =:= $"; Q =:= $' ->
+    step(R, {value, Q, T, {type, <<>>}});
 step(<<Q, R/binary>>, {before_value, T, A}) when Q =:= $"; Q =:= $' -> step(R, {value, Q, T, A});
 step(<<$>, R/binary>>, {before_value, T, _}) -> open(T, R);
 step(<<_, R/binary>>, {before_value, T, A}) -> step(R, {unquoted, T, A});
+step(<<Q, R/binary>>, {value, Q, T, {type, Type}}) -> step(R, {in_tag, typed_script(T, Type)});
+step(<<C, R/binary>>, {value, Q, T, {type, Type}}) -> step(R, {value, Q, T, {type, <<Type/binary, (lower(C))>>}});
 step(<<Q, R/binary>>, {value, Q, T, _}) -> step(R, {in_tag, T});
 step(<<_, R/binary>>, {value, _, _, _} = Ctx) -> step(R, Ctx);
 step(<<C, R/binary>>, {unquoted, T, _}) when ?WS(C) -> step(R, {in_tag, T});
@@ -166,14 +182,55 @@ step(<<$>, R/binary>>, {unquoted, T, _}) -> open(T, R);
 step(<<_, R/binary>>, {unquoted, _, _} = Ctx) -> step(R, Ctx);
 %% script / style content
 step(<<"</", R/binary>>, {raw_text, T} = Ctx) ->
-    case closes(R, T) of
+    case closes(R, base_tag(T)) of
         true -> step(R, end_tag);
         false -> step(R, Ctx)
     end;
 step(<<_, R/binary>>, {raw_text, _} = Ctx) -> step(R, Ctx).
 
-open(Tag, R) when Tag =:= <<"script">>; Tag =:= <<"style">> -> step(R, {raw_text, Tag});
+open(<<"script", _/binary>> = Tag, R) -> step(R, {raw_text, Tag});
+open(<<"style">> = Tag, R) -> step(R, {raw_text, Tag});
 open(_, R) -> step(R, text).
+
+%% A script whose `type' is read is `script:data' (JSON that is data, not code) or `script:typed'
+%% (anything else, which is not looked at again); a script without a `type' stays `script'.
+typed_script(<<"script">>, Type) ->
+    case data_type(string:trim(Type)) of
+        true -> <<"script:data">>;
+        false -> <<"script:typed">>
+    end;
+typed_script(T, _) ->
+    T.
+
+data_type(<<"application/json">>) -> true;
+data_type(<<"application/ld+json">>) -> true;
+data_type(<<"importmap">>) -> true;
+data_type(<<"speculationrules">>) -> true;
+data_type(<<"application/", Rest/binary>>) -> binary:longest_common_suffix([Rest, <<"+json">>]) =:= 5;
+data_type(_) -> false.
+
+%% @doc The element name without the marks of the tracker (`script:data' is a `script').
+-spec base_tag(binary()) -> binary().
+base_tag(<<"script", _/binary>>) -> <<"script">>;
+base_tag(Tag) -> Tag.
+
+%% @doc Where `{: json :}' may stand: `script' (the content of a `<script type="application/json">'
+%% or another data type) or `attribute' (a quoted value of an attribute that takes plain text);
+%% `none' elsewhere.
+-spec json_context(ctx()) -> script | attribute | none.
+json_context({raw_text, <<"script:data">>}) -> script;
+json_context({value, _, _, Attr} = Ctx) ->
+    case block_context(Ctx) of
+        value -> case Attr of {type, _} -> none; _ -> attribute end;
+        _ -> none
+    end;
+json_context(_) -> none.
+
+context_word({raw_text, Tag}) -> case Tag of <<"script">> -> <<"script">>; <<"script:typed">> -> <<"script">>; _ -> base_tag(Tag) end;
+context_word(text) -> text;
+context_word({value, _, _, Attr}) when is_binary(Attr) -> Attr;
+context_word(Ctx) when is_atom(Ctx) -> Ctx;
+context_word(_) -> tag.
 
 closes(R, Tag) ->
     N = byte_size(Tag),

@@ -37,7 +37,7 @@
 -export_type([ast/0, ast_node/0]).
 
 -type ast_node() :: {text, pos_integer(), binary()}
-              | {expr, pos_integer(), escaped | raw, map()}
+              | {expr, pos_integer(), escaped | raw | json | json_script | json_attr, map()}
               | {'if', pos_integer(), [{map(), ast()}], none | ast()}
               | {'case', pos_integer(), map(), [{map(), ast()}]}
               | {'for', pos_integer(), map(), ast(), none | ast()}
@@ -455,7 +455,7 @@ check_scope(Ast, File) ->
     end.
 
 context_name(Ctx) when is_atom(Ctx) -> Ctx;
-context_name({raw_text, Tag}) -> Tag;
+context_name({raw_text, Tag}) -> weberl_template_html:base_tag(Tag);
 context_name({value, _, _, _}) -> attribute_value;
 context_name(Ctx) when is_tuple(Ctx) -> tag.
 

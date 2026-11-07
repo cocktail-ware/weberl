@@ -57,6 +57,14 @@ walk([{text, _, Bin} = Node | Rest], {Ctx, Val}, Env) ->
     Ctx2 = weberl_template_html:advance(Bin, Ctx),
     {Rest2, State} = walk(Rest, {Ctx2, value_after(Bin, Ctx, Ctx2, Val)}, Env),
     {[Node | Rest2], State};
+%% `{: json :}': the encoding depends on where it stands (a data script or an attribute value)
+walk([{expr, Line, json, Parsed} | Rest], {Ctx, Val}, Env) ->
+    Mode = case weberl_template_html:json_context(Ctx) of
+               script -> json_script;
+               attribute -> json_attr
+           end,
+    {Rest2, State} = walk(Rest, {Ctx, bump(Val)}, Env),
+    {[{expr, Line, Mode, Parsed} | Rest2], State};
 walk([{expr, Line, escaped, Parsed} | Rest], {{value, _, Tag, Attr} = Ctx, Val}, Env) ->
     case weberl_template_html:url_attribute(Attr) of
         true ->

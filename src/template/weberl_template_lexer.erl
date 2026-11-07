@@ -3,7 +3,8 @@
 %% Splits a template into literal text and interpolation tokens:
 %% <ul>
 %%   <li>`{text, Line, Binary}'</li>
-%%   <li>`{interp, Line, escaped | raw, Text}' for `{{ Expr }}' and `{{{ Expr }}}'</li>
+%%   <li>`{interp, Line, escaped | raw, Text}' for `{{ Expr }}' and `{{{ Expr }}}'; mode `json' for
+%%       `{: json Expr :}'</li>
 %% </ul>
 %% `Line' is the line of the first character of the token. `Text' is the
 %% Erlang expression exactly as written between the delimiters (the parser reads it
@@ -40,7 +41,7 @@
 -export_type([token/0]).
 
 -type token() :: {text, pos_integer(), binary()}
-               | {interp, pos_integer(), escaped | raw, binary()}
+               | {interp, pos_integer(), escaped | raw | json, binary()}
                | {block_open, pos_integer(), region | slot | fill, atom(), #{tag => binary()}}
                | {block_close, pos_integer(), region | slot | fill, atom()}
                | {stmt, pos_integer(), 'if' | elif | 'case' | 'of' | 'for' | 'else' | empty,
@@ -136,6 +137,7 @@ statement(Trimmed, Content, Line) ->
         <<"case">> -> with_text('case', Rest, Line, TextLine);
         <<"of">> -> with_text('of', Rest, Line, TextLine);
         <<"for">> -> with_text('for', Rest, Line, TextLine);
+        <<"json">> -> json_tag(Rest, Line);
         <<"else">> -> bare('else', Rest, Content, Line);
         <<"empty">> -> bare(empty, Rest, Content, Line);
         <<"/if">> -> closer('if', Rest, Content, Line);
@@ -148,6 +150,14 @@ with_text(Kind, Rest, Line, TextLine) ->
     case string:trim(Rest, both, " \t\r\n") of
         <<>> -> throw({lex_error, Line, {missing_expression, Kind}});
         _ -> {ok, {stmt, Line, Kind, Rest, TextLine}}
+    end.
+
+%% `{: json Expr :}': a value as JSON, for a data script or an attribute. It is an interpolation
+%% of its own mode; the parser and the passes that know the HTML context do the rest.
+json_tag(Rest, Line) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> -> throw({lex_error, Line, {missing_expression, json}});
+        _ -> {ok, {interp, Line, json, Rest}}
     end.
 
 bare(Kind, Rest, Content, Line) ->

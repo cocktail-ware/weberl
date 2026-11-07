@@ -15,7 +15,8 @@
 %% untrusted input.
 -module(weberl_template_runtime).
 
--export([assign/3, escaped/3, raw/3, url/4, escape/1]).
+-export([assign/3, escaped/3, raw/3, url/4, escape/1, json_script/3, json_attr/3]).
+
 
 %% @doc An interpolation inside a URL attribute (`href', `src', ...): the value has to
 %% be one made by `weberl_url', and its kind has to suit the attribute (HANDOFF
@@ -47,6 +48,34 @@ assign(Name, Assigns, View) ->
     case maps:find(Name, Assigns) of
         {ok, Value} -> Value;
         error -> erlang:error({template_error, {missing_variable, View, Name}})
+    end.
+
+%% @doc `{: json Expr :}' in a data script (`<script type="application/json">'): the value as JSON
+%% (`json:encode/1': maps, lists, binaries, numbers, `true', `false', `null', other atoms as strings),
+%% with `<', `>', `&' and the line separators U+2028/9 written as `\\uXXXX', so the text cannot close
+%% the script, open a comment or end a line. The page reads it with `JSON.parse(el.textContent)'.
+%% A value JSON cannot hold raises `{template_error, {unsupported_value, View, Source, Value}}'.
+-spec json_script(term(), module(), binary()) -> binary().
+json_script(Value, View, Source) ->
+    iolist_to_binary(script_safe(json_text(Value, View, Source))).
+
+script_safe(<<>>) -> [];
+script_safe(<<$<, R/binary>>) -> ["\\u003c" | script_safe(R)];
+script_safe(<<$>, R/binary>>) -> ["\\u003e" | script_safe(R)];
+script_safe(<<$&, R/binary>>) -> ["\\u0026" | script_safe(R)];
+script_safe(<<16#2028/utf8, R/binary>>) -> ["\\u2028" | script_safe(R)];
+script_safe(<<16#2029/utf8, R/binary>>) -> ["\\u2029" | script_safe(R)];
+script_safe(<<C, R/binary>>) -> [C | script_safe(R)].
+
+%% @doc `{: json Expr :}' in a quoted attribute value: the JSON, HTML-escaped
+%% (`data-state="{: json @state :}"', read with `JSON.parse(el.dataset.state)').
+-spec json_attr(term(), module(), binary()) -> binary().
+json_attr(Value, View, Source) ->
+    escape(json_text(Value, View, Source)).
+
+json_text(Value, View, Source) ->
+    try iolist_to_binary(json:encode(Value))
+    catch error:_ -> erlang:error({template_error, {unsupported_value, View, Source, Value}})
     end.
 
 -spec escaped(term(), module(), binary()) -> binary().
