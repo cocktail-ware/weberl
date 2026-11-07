@@ -809,8 +809,8 @@ expression like `{{ }}` and writes it as JSON (`json:encode/1`: maps, lists, bin
   `{{ }}` stays refused in every script.
 - **A quoted attribute value** that takes plain text: the JSON is HTML-escaped (`JSON.parse(el.dataset.state)`).
   Not in URL attributes, `style`, `on*`, ...: `{json_not_allowed_here, Attr}`; not in text.
-- The `type` of a `<script>` is read as literal text: `{{ }}` or a block in it is an error
-  (`{interpolation_in_restricted_attribute, <<"type">>}`), because it decides what the content is.
+- The `type` of a `<script>` is read as literal text: `{{ }}` in it is
+  `{interpolation_in_restricted_attribute, <<"type">>}` and a block `{block_in_restricted_attribute, <<"type">>}`, because it decides what the content is.
 - A value JSON cannot hold (a pid, a tuple) raises `{template_error, {unsupported_value, View, Source, Value}}`
   when the page renders.
 - Live pages: `{: json :}` inside a region is re-rendered with it, like any interpolation.
