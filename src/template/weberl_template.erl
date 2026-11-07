@@ -72,7 +72,9 @@
 %% `variant': compile the pair of the view and the layout it is composed with into that pair's
 %% own module (default: the view's default module); `layouts': the layouts the view may be
 %% rendered with, recorded for `render/3' (default: only the layout given).
--type compile_opts() :: #{routes => weberl_table:t(), variant => atom(), layouts => [atom()]}.
+%% `components': the components views may use, by name (see `weberl_template_component:load/2').
+-type compile_opts() :: #{routes => weberl_table:t(), variant => atom(), layouts => [atom()],
+                          components => weberl_template_component:components()}.
 
 %% ---------------------------------------------------------------------------
 %% Rendering
@@ -277,13 +279,20 @@ analyze_and_compile(View, Full0, File, Layout, Opts) ->
     %% blocks between the attributes of a tag get their separating spaces first
     Full = weberl_template_attrs:prepare(Full0),
     case weberl_template_urls:analyze(Full, File, Opts) of
-        {ok, Analyzed, Warnings} ->
-            case weberl_template_parser:check_scope(Analyzed, File) of
-                ok ->
-                    CompileOpts = maps:with([variant, layouts], Opts),
-                    case weberl_template_compiler:compile(View, Analyzed, File, layout_name(Layout), CompileOpts) of
-                        {ok, Mod, Bin} -> {ok, {Mod, Bin, File, Warnings}};
-                        {error, _} = Error -> Error
+        {ok, Analyzed0, Warnings} ->
+            %% components are put in after the links are analysed (each was analysed alone)
+            case weberl_template_component:expand(Analyzed0, maps:get(components, Opts, #{}), File) of
+                {ok, Analyzed} ->
+                    case weberl_template_parser:check_scope(Analyzed, File) of
+                        ok ->
+                            CompileOpts = maps:with([variant, layouts], Opts),
+                            case weberl_template_compiler:compile(View, Analyzed, File, layout_name(Layout),
+                                                                  CompileOpts) of
+                                {ok, Mod, Bin} -> {ok, {Mod, Bin, File, Warnings}};
+                                {error, _} = Error -> Error
+                            end;
+                        {error, _} = Error ->
+                            Error
                     end;
                 {error, _} = Error ->
                     Error

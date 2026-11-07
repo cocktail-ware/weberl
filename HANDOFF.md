@@ -498,6 +498,16 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   as `attrs` values of `{: form :}`; (2) `{snapshot_json, Name, Term}` from `handle_subscribe/2`; (5a) `data => Term` in
   the route options and `weberl_request:route_data/1`. Left open from the feedback: 1 (defaults for live pages,
   set aside), 5b/5c (a resource-with-actions behaviour, re-rendering a view with an error: a convention).
+- **Components built (2026-11-07).** `weberl_template_component` (`load/2` reads the `components` directories,
+  `expand/3` inlines the calls), new nodes `component`, `param` and `scope` in `weberl_template_parser`,
+  lexer tokens `component_open/close` and `param`, `scope` node in `weberl_template_compiler` (a fun binding the
+  parameters), router option `components` (`weberl_config:components/1`, excluded from the views' template
+  discovery in `weberl_views`), `weberl_blocks_expr:form_facts/1`. Expansion runs in `analyze_and_compile` after
+  the link analysis (each file is analysed alone, so placeholders in URLs become assigns before the parameters
+  are bound) and before `check_scope`. Per use: parameters become variables `_Weberl_cN_p_name`, the component's
+  locals are renamed `_Weberl_cN_Name`, `assigns` of its parsed facts empty into `free`; a `form` of the
+  component used in a region gets `in_region`. Component files' link warnings are dropped. 1112 tests.
+  README "Components".
 - **Components (item 4), decisions of the user, 2026-11-07, one point at a time:**
   1. *Where.* File components, inlined at compile time: `.weberl` files under the router's `components`
      directories (a list, like `layouts`, no default; several allowed), **nested directories allowed and part of the

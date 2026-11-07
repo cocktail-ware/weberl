@@ -43,14 +43,18 @@ prepare(Router, Table) ->
 prepare(Router, Views, Selected, Table) ->
     LayoutFiles = lists:sort(lists:append([weberl_template:discover(D)
                                            || D <- weberl_config:layouts(Router)])),
+    ComponentDirs = weberl_config:components(Router),
+    ComponentFiles = lists:append([weberl_template:discover(D) || D <- ComponentDirs]),
     Templates = [T || T <- lists:append([weberl_template:discover(weberl_config:root(F))
                                          || F <- weberl_config:filesystem(Router)]),
-                      not lists:member(norm(T), [norm(L) || L <- LayoutFiles])],
+                      not lists:member(norm(T), [norm(L) || L <- LayoutFiles ++ ComponentFiles])],
     case weberl_template:associate(Templates, Views) of
         {ok, Pairs} ->
-            case layouts(LayoutFiles) of
-                {ok, Layouts} -> compile_all(Pairs, Views, Layouts, Selected, Table);
-                {error, _} = Error -> Error
+            maybe
+                {ok, Layouts} ?= layouts(LayoutFiles),
+                {ok, Components} ?= weberl_template_component:load(ComponentDirs, #{routes => Table}),
+                compile_all(Pairs, Views, Layouts, Selected,
+                            #{routes => Table, components => Components})
             end;
         {error, _} = Error ->
             Error
@@ -71,11 +75,11 @@ layouts(Files) ->
             {error, {duplicate_layouts, Dups}}
     end.
 
-compile_all(Pairs, Views, Layouts, Selected, Table) ->
+compile_all(Pairs, Views, Layouts, Selected, CompileOpts) ->
     Templated = [View || {View, _} <- Pairs],
     Orphans = [{View, layout_without_template} || {View, _} <- Views,
                    not lists:member(View, Templated), maps:get(View, Selected) =/= {none, []}],
-    Results = [{View, compile(View, File, Layouts, maps:get(View, Selected), #{routes => Table})}
+    Results = [{View, compile(View, File, Layouts, maps:get(View, Selected), CompileOpts)}
                || {View, File} <- Pairs],
     case Orphans ++ [{View, Reason} || {View, {error, Reason}} <- Results] of
         [] ->

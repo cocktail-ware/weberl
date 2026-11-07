@@ -32,7 +32,7 @@
 %% name an earlier qualifier already bound) and `{reserved_variable, Name}'.
 -module(weberl_blocks_expr).
 
--export([expression/2, clause/2, qualifiers/2, render/2, tag_end/2]).
+-export([expression/2, clause/2, qualifiers/2, render/2, tag_end/2, form_facts/1]).
 -export_type([hooks/0, parsed/0, error/0, tag_error/0]).
 
 %% Why a tag text could not be delimited; `Lines' is the number of line breaks before
@@ -345,3 +345,9 @@ quoted(<<C, Rest/binary>>, Q, Len, Newlines) -> quoted(Rest, Q, Len + 1, Newline
 comment(<<$\n, _/binary>> = Rest, Len) -> {Len, Rest};
 comment(<<_, Rest/binary>>, Len) -> comment(Rest, Len + 1);
 comment(<<>>, Len) -> {Len, <<>>}.
+
+%% @doc The facts about a form that was parsed as part of a larger expression (one value of a map
+%% literal, say): `#{form, assigns, free, bound}' as {@link expression/2} returns them.
+-spec form_facts(term()) -> parsed().
+form_facts(Form) ->
+    (facts(Form, [], [Form]))#{form => Form}.

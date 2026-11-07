@@ -176,6 +176,7 @@ Listener = #listener{adapter = weberl_roadrunner, ip = {127, 0, 0, 1}, port = 88
 | `router` | `filesystem` | `[]` | list of `filesystem_router` |
 | | `modules` | `[]` | declarative router modules |
 | | `layouts` | `[]` | directories of [layout](#layouts) templates |
+| | `components` | `[]` | directories of [component](#components) templates |
 | | `limits` | `#{}` | [form limits](#forms-and-uploads) for every route of the router (a route's own `limits` win) |
 | `filesystem_router` | `root` | required | directory string |
 | | `prefix` | `"/"` | URL prefix for the whole root |
@@ -1204,6 +1205,59 @@ Compile errors (all `{syntax_error, File, Line, Reason}`): `{unknown_fill, Name,
 `{content_unbalanced_markup, Where}` and, for unclosed or mismatched blocks,
 `{unclosed_slot, Name}`, `{unexpected_fill_end, Name}`, `{mismatched_slot_end, Open, Got}` and
 `{mismatched_block_end, {Kind, Open}, {Kind, Got}}` (a `/region` closing a slot, say).
+
+### Components
+
+A component is a template that several views share. It is a `.weberl` file below one of the router's
+`components` directories; its name is its path below the directory without the extension
+(`components/forms/field.weberl` is `forms/field`; the segments are `[a-z][a-z0-9_]*`). The same name in two
+directories fails the start (`{duplicate_components, [{Name, Files}]}`).
+
+```html
+<!-- components/panel.weberl -->
+{: param title :}
+{: param open, false :}
+<details class="panel" {: if @open :}open{: /if :}>
+  <summary>{{ @title }}</summary>
+  <div class="panel-body">{: content :}</div>
+</details>
+
+<!-- a view -->
+{: component panel, #{title => "Edit node", open => @update_open} :}
+  <p class="form-error">{{ @update_error }}</p>
+  {: form weberl_url:router_path("/nodes") :} ... {: /form :}
+{: /component :}
+```
+
+- **Parameters.** `{: param name :}` is required, `{: param name, Default :}` optional. Declarations stand at the
+  top of the file (white space after them is dropped). A default is an Erlang expression that reads no assigns
+  or parameters, evaluated on every render. The call passes **a literal map with atom keys**; the values are
+  expressions in the caller's scope (`@update_open` is the *caller's* assign). Any other expression is
+  `component_params_not_a_map_literal`: the keys are checked when the router starts.
+- **Inside the component**, `@name` is a parameter, nothing else: an assign that is not declared is
+  `{undeclared_assign, Name}`, the component never reads the caller's. Its own variables (`for`, `case`) cannot
+  clash with the caller's, nor with another use of the component.
+- **Body and slots.** `{: content :}` is where the body of the call goes (at most once, it may stand in `if`
+  and `case` branches). `{: slot name :}default{: /slot name :}` in the component and
+  `{: fill name :}...{: /fill name :}` as blocks directly in the call work as in [layouts](#slots); the rest of
+  the call is the content. A call is always closed with `{: /component :}`; a component without `{: content :}`
+  takes only white space besides its fills. The body and the fills are written in the caller's scope (its
+  assigns, its `for` variables); a slot default is the component's and sees its parameters.
+- **Regions and forms.** A component file cannot contain regions (it is inlined, and a region name is used
+  once per page); a region in the body or in a fill is the caller's. A component used inside a region is
+  re-rendered with it, and its region depends on the assigns of the values and the body. A `{: form :}`
+  of a component used in a region is filled by the page like any form of a region.
+- **Where they can stand.** In HTML text, in views, layouts and other components; a call may nest in another.
+  A component cannot use itself, even through others (`{component_cycle, Names}`). Inlining happens when the
+  router starts, after the links of each file were checked on their own.
+- **Errors**, with file and line: `{unknown_component, Name}`, `{missing_component_param, Name, Param}`,
+  `{unknown_component_param, Name, Param}`, `{duplicate_component_param, Param}`, `{unknown_fill, Slot, Name}`,
+  `{component_without_content, Name}`, `component_unbalanced_markup`, `{component_in_unsupported_context, Where}`,
+  and in a component file `{param_not_at_top, Param}`, `{duplicate_param, Param}`,
+  `{param_default_not_constant, Param}`, `{duplicate_content, Name}`, `{region_in_component, Name}`,
+  `{fill_in_component, Name}` and `{param_outside_component, Param}` (a `param` in a view or layout).
+
+Planned: components as functions of an Erlang module (`ROADMAP.md`, "Components").
 
 ### Compile errors
 

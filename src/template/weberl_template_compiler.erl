@@ -128,6 +128,18 @@ part({form, Line, #{action := #{form := ActionForm, url := #{policy := Policy, p
             [ActionValue, OptsValue, {atom, Line, View}, {integer, Line, Line}, {atom, Line, InRegion},
              erl_parse:abstract({Policy, Position}, Line)]},
     {cons, Line, Open, {cons, Line, body(Children, View), {cons, Line, erl_parse:abstract(<<"</form>">>, Line), {nil, Line}}}};
+%% A used component: its parameters are bound to the values of the call, in a fun that holds its
+%% content (the body and fills of the call are in there too, and keep the caller's variables).
+part({scope, Line, Binds, Children}, View) ->
+    Local = maps:get(local, hooks(View)),
+    Vars = [{var, Line, Local(Var)} || {Var, _} <- Binds],
+    Values = [weberl_blocks_expr:render(Form, hooks(View)) || {_, #{form := Form}} <- Binds],
+    case Vars of
+        [] ->
+            body(Children, View);
+        _ ->
+            {call, Line, {'fun', Line, {clauses, [{clause, Line, Vars, [], [body(Children, View)]}]}}, Values}
+    end;
 %% `if' / `elif' / `else': each condition has to be exactly `true' or `false'.
 part({'if', Line, Branches, Else}, View) ->
     if_chain(Branches, Else, Line, View);

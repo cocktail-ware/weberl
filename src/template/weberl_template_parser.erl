@@ -24,13 +24,20 @@
 %%       (`Empty' is `none' or the children of the `empty' branch). `Cond', `Expr',
 %%       `Clause' and `Qualifiers' are what `weberl_blocks_expr' returned, plus `source'
 %%       and `line'.</li>
+%%   <li>`{component, Line, Name, Params, Children}': `{: component name, #{...} :}...{: /component :}',
+%%       a use of a component (see `weberl_template_component'); `Name' is a binary (`<<"forms/field">>'),
+%%       `Params' is `[{Key, Parsed}]' (the values of the map literal), `Children' the body and the
+%%       `fill' blocks. `{param, Line, Name, Default}': `{: param name[, Default] :}' in a component
+%%       file (`Default' is `none' or what `weberl_blocks_expr:expression/2' returned).
+%%       `{scope, Line, Binds, Children}' is what the expansion of a component call leaves: the values
+%%       bound to the (renamed) parameters, `Binds' being `[{Var, Parsed}]', around the component's content.</li>
 %%   <li>`{slot, Line, Name, Default}': `{: slot name :}...{: /slot name :}' in a
 %%       layout; `{fill, Line, Name, Children}': `{: fill name :}...{: /fill name :}',
 %%       a top-level block of a view that replaces the layout's slot of that name.</li>
 %% </ul>
 -module(weberl_template_parser).
 
--export([parse/1, parse/2, validate/2, validate_layout/2, validate_content/2, variables/1, regions/1,
+-export([parse/1, parse/2, validate/2, validate_layout/2, validate_component/2, validate_content/2, variables/1, regions/1,
          children/1, map_children/2, check_scope/2]).
 
 -define(IS_STMT(K), (K =:= 'if' orelse K =:= 'case' orelse K =:= 'for')).
@@ -44,6 +51,9 @@
               | {region, pos_integer(), atom(), default | binary(), ast()}
               | {form, pos_integer(), map(), ast()}
               | {content, pos_integer()}
+              | {component, pos_integer(), binary(), [{atom(), map()}], ast()}
+              | {param, pos_integer(), atom(), none | map()}
+              | {scope, pos_integer(), [{atom(), map()}], ast()}
               | {slot | fill, pos_integer(), atom(), ast()}.
 -type ast() :: [ast_node()].
 
@@ -73,6 +83,8 @@ build([], [], Acc, _Seen) ->
     lists:reverse(Acc);
 build([], [{form, _Head, Line, _, _} | _], _Acc, _Seen) ->
     throw({parse_error, Line, {unclosed_block, form}});
+build([], [{component, _Head, Line, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {unclosed_block, component}});
 build([], [{Kind, _State, Line, _, _} | _], _Acc, _Seen) when ?IS_STMT(Kind) ->
     throw({parse_error, Line, {unclosed_block, Kind}});
 build([], [{Kind, Name, Line, _, _} | _], _Acc, _Seen) ->
@@ -105,8 +117,30 @@ build([{form_close, Line} | _], [], _Acc, _Seen) ->
 build([{form_close, _} | T], [{form, Head, Line, _, Outer} | Stack], Acc, Seen) ->
     build(T, Stack, [{form, Line, Head, lists:reverse(Acc)} | Outer], Seen);
 build([{form_close, Line} | _], [{Open, Name, _, _, _} | _], _Acc, _Seen) ->
-    throw({parse_error, Line, {mismatched_block_end, {Open, case ?IS_STMT(Open) of true -> none; false -> Name end},
+    throw({parse_error, Line, {mismatched_block_end, {Open, case ?IS_STMT(Open) orelse Open =:= component of
+                                                                 true -> none; false -> Name end},
                                {form, none}}});
+%% `{: component Name [, #{Params}] :}' ... `{: /component :}': the call of a component. The head is the
+%% name and the parameters, which have to be a literal map with atom keys. Calls may nest.
+build([{component_open, Line, Name, ParamsText, TextLine} | T], Stack, Acc, Seen) ->
+    Head = #{name => Name, params => component_params(ParamsText, TextLine)},
+    build(T, [{component, Head, Line, none, Acc} | Stack], [], Seen);
+build([{component_close, Line} | _], [], _Acc, _Seen) ->
+    throw({parse_error, Line, {unexpected_block_end, component}});
+build([{component_close, _} | T], [{component, #{name := Name, params := Params}, Line, _, Outer} | Stack],
+      Acc, Seen) ->
+    build(T, Stack, [{component, Line, Name, Params, lists:reverse(Acc)} | Outer], Seen);
+build([{component_close, Line} | _], [{Open, Name, _, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {mismatched_block_end,
+                               {Open, case ?IS_STMT(Open) orelse Open =:= form of true -> none; false -> Name end},
+                               {component, none}}});
+%% `{: param Name [, Default] :}': a parameter of the component file (checked where the file is read)
+build([{param, Line, Name, DefaultText, TextLine} | T], Stack, Acc, Seen) ->
+    Default = case DefaultText of
+                  none -> none;
+                  _ -> expression(DefaultText, TextLine)
+              end,
+    build(T, Stack, [{param, Line, Name, Default} | Acc], Seen);
 %% statements: `{: if :}', `{: case :}', `{: for :}' open a block ...
 build([{stmt, Line, Kind, Text, TextLine} | T], Stack, Acc, Seen)
   when Kind =:= 'if'; Kind =:= 'case'; Kind =:= 'for' ->
@@ -127,23 +161,26 @@ build([{stmt_end, Line, Kind} | _], [], _Acc, _Seen) ->
 build([{stmt_end, _Line, Kind} | T], [{Kind, State, OLine, _, Outer} | Stack], Acc, Seen) ->
     build(T, Stack, [finish_stmt(Kind, State, OLine, Acc) | Outer], Seen);
 build([{stmt_end, Line, Kind} | _], [{Open, Name, _, _, _} | _], _Acc, _Seen) ->
-    case ?IS_STMT(Open) orelse Open =:= form of
+    case ?IS_STMT(Open) orelse Open =:= form orelse Open =:= component of
         true -> throw({parse_error, Line, {mismatched_block_end, {Open, none}, {Kind, none}}});
         false -> throw({parse_error, Line, {mismatched_block_end, {Open, Name}, {Kind, none}}})
     end;
 build([{block_close, Line, Kind, Name} | _], [{form, _, _, _, _} | _], _Acc, _Seen) ->
     throw({parse_error, Line, {mismatched_block_end, {form, none}, {Kind, Name}}});
+build([{block_close, Line, Kind, Name} | _], [{component, _, _, _, _} | _], _Acc, _Seen) ->
+    throw({parse_error, Line, {mismatched_block_end, {component, none}, {Kind, Name}}});
 build([{block_close, Line, Kind, Name} | _], [{Open, _State, _, _, _} | _], _Acc, _Seen)
   when ?IS_STMT(Open) ->
     throw({parse_error, Line, {mismatched_block_end, {Open, none}, {Kind, Name}}});
 build([{block_open, Line, Kind, Name, Opts} | T], Stack, Acc, Seen) ->
+    Key = seen_key(Kind, Name, Stack),
     case Seen of
-        #{{Kind, Name} := First} -> throw({parse_error, Line, {duplicate(Kind), Name, First}});
+        #{Key := First} -> throw({parse_error, Line, {duplicate(Kind), Name, First}});
         _ -> ok
     end,
     nesting(Kind, Name, Line, Stack),
     Tag = maps:get(tag, Opts, default),
-    build(T, [{Kind, Name, Line, Tag, Acc} | Stack], [], Seen#{{Kind, Name} => Line});
+    build(T, [{Kind, Name, Line, Tag, Acc} | Stack], [], Seen#{Key => Line});
 build([{block_close, Line, Kind, Name} | _], [], _Acc, _Seen) ->
     throw({parse_error, Line, {event(unexpected, Kind), Name}});
 build([{block_close, Line, Kind, Name} | _], [{Kind, Open, _, _, _} | _], _Acc, _Seen)
@@ -155,12 +192,41 @@ build([{block_close, Line, Kind, Name} | _], [{Other, Open, _, _, _} | _], _Acc,
 build([{block_close, _, Kind, Name} | T], [{Kind, Name, Line, Tag, Outer} | Stack], Acc, Seen) ->
     build(T, Stack, [node(Kind, Line, Name, Tag, lists:reverse(Acc)) | Outer], Seen).
 
+%% A fill is named within the component call it stands in (or the view, for a layout's fills).
+seen_key(fill, Name, [{component, _, Line, _, _} | _]) -> {fill, Name, Line};
+seen_key(Kind, Name, _Stack) -> {Kind, Name}.
+
+%% The parameters of a component call: the values of a map literal with atom keys, each with what
+%% it uses. Anything else cannot be checked when the router starts.
+component_params(none, _Line) ->
+    [];
+component_params(Text, Line) ->
+    #{form := Form} = expression(Text, Line),
+    case Form of
+        {map, _, Assocs} ->
+            Params = [param_entry(A, Text, Line) || A <- Assocs],
+            Keys = [K || {K, _} <- Params],
+            case Keys -- lists:usort(Keys) of
+                [Dup | _] -> throw({parse_error, Line, {duplicate_component_param, Dup}});
+                [] -> Params
+            end;
+        _ ->
+            throw({parse_error, Line, component_params_not_a_map_literal})
+    end.
+
+param_entry({map_field_assoc, _, {atom, _, Key}, Value}, Text, Line) ->
+    {Key, (weberl_blocks_expr:form_facts(Value))#{source => string:trim(Text, both, " \t\r\n"), line => Line}};
+param_entry(_, _Text, Line) ->
+    throw({parse_error, Line, component_params_not_a_map_literal}).
+
 node(region, Line, Name, Tag, Children) -> {region, Line, Name, Tag, Children};
 node(slot, Line, Name, _Tag, Children) -> {slot, Line, Name, Children};
 node(fill, Line, Name, _Tag, Children) -> {fill, Line, Name, Children}.
 
 %% A fill is a top-level block of a view; a slot may be inside a region of the
 %% layout but not inside another slot (or a fill).
+nesting(fill, _Name, _Line, [{component, _, _, _, _} | _]) ->
+    ok;
 nesting(fill, Name, Line, [_ | _]) ->
     throw({parse_error, Line, {fill_not_top_level, Name}});
 nesting(slot, Name, Line, Stack) ->
@@ -267,6 +333,12 @@ scope_node({region, Line, Name, _, Children}, Env, Ctx) ->
     scope(Children, [], Ctx#{region => {Name, Line}, outer => Outer});
 scope_node({Kind, _, _, Children}, Env, Ctx) when Kind =:= slot; Kind =:= fill ->
     scope(Children, Env, Ctx);
+scope_node({component, Line, _Name, Params, Children}, Env, Ctx) ->
+    lists:foreach(fun({_, Value}) -> check_free(Value, Line, Env, Ctx) end, Params),
+    scope(Children, Env, Ctx);
+scope_node({scope, Line, Binds, Children}, Env, Ctx) ->
+    lists:foreach(fun({_, Value}) -> check_free(Value, Line, Env, Ctx) end, Binds),
+    scope(Children, [Var || {Var, _} <- Binds] ++ Env, Ctx);
 scope_node({form, Line, #{action := Action, opts := Opts}, Children}, Env, Ctx) ->
     check_free(Action, Line, Env, Ctx),
     Opts =:= none orelse check_free(Opts, Line, Env, Ctx),
@@ -340,6 +412,14 @@ validate(Ast, File) ->
 validate_layout(Ast, File) ->
     check(Ast, File, layout).
 
+%% @doc Like {@link validate/2} for a component file: `{: content :}' and slots as in a layout, no
+%% regions (the file is inlined where it is used, so a region name could be used twice) and no
+%% fill outside a component call.
+-spec validate_component(ast(), file:filename_all()) ->
+    ok | {error, {syntax_error, file:filename_all(), pos_integer(), term()}}.
+validate_component(Ast, File) ->
+    check(Ast, File, component).
+
 %% @doc The part of a view that goes into a layout's `{: content :}' (the view
 %% without its fills) has to end in HTML text, or it would leave a tag open in the
 %% layout. Reported at the line of its last node.
@@ -372,7 +452,13 @@ walk([{expr, Line, Mode, _Parsed} | Rest], Ctx, {File, _} = Env) ->
     end;
 walk([{content, Line} | _], _Ctx, {File, view}) ->
     {error, {syntax_error, File, Line, content_outside_layout}};
-walk([{content, Line} | Rest], Ctx, {File, layout} = Env) ->
+walk([{param, Line, Name, _} | _], _Ctx, {File, Mode}) when Mode =/= component ->
+    {error, {syntax_error, File, Line, {param_outside_component, Name}}};
+walk([{param, _, _, _} | Rest], Ctx, Env) ->
+    walk(Rest, Ctx, Env);
+walk([{region, Line, Name, _, _} | _], _Ctx, {File, component}) ->
+    {error, {syntax_error, File, Line, {region_in_component, Name}}};
+walk([{content, Line} | Rest], Ctx, {File, _} = Env) ->
     case Ctx of
         text -> walk(Rest, Ctx, Env);
         _ -> {error, {syntax_error, File, Line, {content_in_unsupported_context, context_name(Ctx)}}}
@@ -381,19 +467,34 @@ walk([{slot, Line, Name, _} | _], _Ctx, {File, view}) ->
     {error, {syntax_error, File, Line, {slot_outside_layout, Name}}};
 walk([{fill, Line, Name, _} | _], _Ctx, {File, layout}) ->
     {error, {syntax_error, File, Line, {fill_in_layout, Name}}};
-walk([{Kind, Line, Name, Children} | Rest], Ctx, {File, _} = Env) when Kind =:= slot; Kind =:= fill ->
-    %% like a region: begins in text and has to end in text
+walk([{fill, Line, Name, _} | _], _Ctx, {File, component}) ->
+    {error, {syntax_error, File, Line, {fill_in_component, Name}}};
+walk([{Kind, Line, Name, Children} | Rest], Ctx, Env) when Kind =:= slot; Kind =:= fill ->
+    case slot_or_fill(Kind, Line, Name, Children, Ctx, Env) of
+        ok -> walk(Rest, Ctx, Env);
+        {error, _} = Error -> Error
+    end;
+%% `{: component :}': like a form, the call begins in text; the fills are checked like those of a view
+%% and everything else (the body) has to end in text, since it goes where the component's
+%% `{: content :}' is.
+walk([{component, Line, _Name, _Params, Children} | Rest], Ctx, {File, _} = Env) ->
     case Ctx of
         text ->
-            case walk(Children, weberl_template_html:initial(), Env) of
-                {ok, text} -> walk(Rest, Ctx, Env);
-                {ok, _Other} ->
-                    {error, {syntax_error, File, Line, {unbalanced_markup, Kind, Name}}};
-                {error, _} = Error ->
-                    Error
+            {Fills, Body} = lists:partition(fun(N) -> element(1, N) =:= fill end, Children),
+            Checked = [slot_or_fill(fill, FLine, FName, FChildren, Ctx, Env)
+                       || {fill, FLine, FName, FChildren} <- Fills],
+            case [E || {error, _} = E <- Checked] of
+                [Error | _] ->
+                    Error;
+                [] ->
+                    case walk(Body, Ctx, Env) of
+                        {ok, text} -> walk(Rest, Ctx, Env);
+                        {ok, _Other} -> {error, {syntax_error, File, Line, component_unbalanced_markup}};
+                        {error, _} = Error -> Error
+                    end
             end;
         _ ->
-            {error, {syntax_error, File, Line, {in_unsupported_context, Kind, Name, context_name(Ctx)}}}
+            {error, {syntax_error, File, Line, {component_in_unsupported_context, context_name(Ctx)}}}
     end;
 walk([{form, Line, _Head, Children} | Rest], Ctx, {File, _} = Env) ->
     %% the tags are written here, so the form begins in text and its content has to end in text
@@ -426,6 +527,19 @@ walk([{region, Line, Name, _Tag, Children} | Rest], Ctx, {File, _} = Env) ->
             end;
         _ ->
             {error, {syntax_error, File, Line, {region_in_unsupported_context, Name, context_name(Ctx)}}}
+    end.
+
+%% A slot or a fill is like a region: it begins in text and has to end in text.
+slot_or_fill(Kind, Line, Name, Children, Ctx, {File, _} = Env) ->
+    case Ctx of
+        text ->
+            case walk(Children, weberl_template_html:initial(), Env) of
+                {ok, text} -> ok;
+                {ok, _Other} -> {error, {syntax_error, File, Line, {unbalanced_markup, Kind, Name}}};
+                {error, _} = Error -> Error
+            end;
+        _ ->
+            {error, {syntax_error, File, Line, {in_unsupported_context, Kind, Name, context_name(Ctx)}}}
     end.
 
 %% `if', `case' and `for' stand in HTML text, between the attributes of a start tag and inside the
@@ -466,6 +580,8 @@ branches([Children | Rest], Env, Start) ->
 children({region, _, _, _, Children}) -> [Children];
 children({Kind, _, _, Children}) when Kind =:= slot; Kind =:= fill -> [Children];
 children({form, _, _, Children}) -> [Children];
+children({component, _, _, _, Children}) -> [Children];
+children({scope, _, _, Children}) -> [Children];
 children({'if', _, Branches, Else}) ->
     [Children || {_, Children} <- Branches] ++ [Else || Else =/= none];
 children({'case', _, _, Clauses}) -> [Children || {_, Children} <- Clauses];
@@ -478,6 +594,8 @@ map_children(Fun, {region, Line, Name, Tag, Children}) -> {region, Line, Name, T
 map_children(Fun, {Kind, Line, Name, Children}) when Kind =:= slot; Kind =:= fill ->
     {Kind, Line, Name, Fun(Children)};
 map_children(Fun, {form, Line, Head, Children}) -> {form, Line, Head, Fun(Children)};
+map_children(Fun, {component, Line, Name, Params, Children}) -> {component, Line, Name, Params, Fun(Children)};
+map_children(Fun, {scope, Line, Binds, Children}) -> {scope, Line, Binds, Fun(Children)};
 map_children(Fun, {'if', Line, Branches, Else}) ->
     {'if', Line, [{Cond, Fun(Children)} || {Cond, Children} <- Branches],
      case Else of none -> none; _ -> Fun(Else) end};
@@ -514,6 +632,8 @@ vars(Ast) ->
 own_assigns({expr, _, _, #{assigns := Assigns}}) -> Assigns;
 own_assigns({form, _, #{action := #{assigns := A}, opts := Opts}, _}) ->
     A ++ case Opts of none -> []; #{assigns := OA} -> OA end;
+own_assigns({component, _, _, Params, _}) -> lists:flatmap(fun({_, #{assigns := A}}) -> A end, Params);
+own_assigns({scope, _, Binds, _}) -> lists:flatmap(fun({_, #{assigns := A}}) -> A end, Binds);
 own_assigns({'if', _, Branches, _}) -> lists:flatmap(fun({#{assigns := A}, _}) -> A end, Branches);
 own_assigns({'case', _, #{assigns := A}, Clauses}) ->
     A ++ lists:flatmap(fun({#{assigns := CA}, _}) -> CA end, Clauses);

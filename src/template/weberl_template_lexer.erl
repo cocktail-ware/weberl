@@ -24,6 +24,10 @@
 %% and `{content, Line}' for `{: content :}' (where a layout puts the view's
 %% template). `\{:' is a literal `{:'.
 %%
+%% Components: `{component_open, Line, Name, ParamsText | none, TextLine}' for
+%% `{: component name[, #{...}] :}', `{component_close, Line}' for `{: /component :}' and
+%% `{param, Line, Name, DefaultText | none, TextLine}' for `{: param name[, Default] :}'.
+%%
 %% Statements: `{stmt, Line, Kind, Text, TextLine}' for `{: if Expr :}',
 %% `{: elif Expr :}', `{: case Expr :}', `{: of Clause :}', `{: for Qualifiers :}'
 %% (`Text' is the Erlang text as written, `TextLine' the line it starts on; the tag
@@ -49,6 +53,9 @@
                | {stmt_end, pos_integer(), 'if' | 'case' | 'for'}
                | {form_open, pos_integer(), binary(), binary() | none, pos_integer()}
                | {form_close, pos_integer()}
+               | {component_open, pos_integer(), binary(), binary() | none, pos_integer()}
+               | {component_close, pos_integer()}
+               | {param, pos_integer(), atom(), binary() | none, pos_integer()}
                | {content, pos_integer()}.
 
 -spec tokenize(binary(), file:filename_all()) ->
@@ -142,6 +149,9 @@ statement(Trimmed, Content, Line) ->
         <<"json">> -> json_tag(Rest, Line);
         <<"form">> -> form_tag(Rest, Line, TextLine);
         <<"/form">> -> form_close(Rest, Content, Line);
+        <<"component">> -> component_tag(Rest, Content, Line, TextLine);
+        <<"/component">> -> component_close(Rest, Content, Line);
+        <<"param">> -> param_tag(Rest, Content, Line, TextLine);
         <<"else">> -> bare('else', Rest, Content, Line);
         <<"empty">> -> bare(empty, Rest, Content, Line);
         <<"/if">> -> closer('if', Rest, Content, Line);
@@ -189,6 +199,54 @@ form_close(Rest, Content, Line) ->
     case string:trim(Rest, both, " \t\r\n") of
         <<>> -> {ok, {form_close, Line}};
         _ -> throw({lex_error, Line, {invalid_block_tag, Content}})
+    end.
+
+%% `{: component name :}' / `{: component name, Params :}': the name is a path of lower case words
+%% (`forms/field'), then, after the first comma outside brackets and strings, the parameters (a map
+%% literal, checked by the parser).
+component_tag(Rest, Content, Line, TextLine) ->
+    {NameText, Params} =
+        case weberl_blocks_expr:tag_end(Rest, <<",">>) of
+            {ok, Pos} ->
+                P = binary:part(Rest, Pos + 1, byte_size(Rest) - Pos - 1),
+                string:trim(P, both, " \t\r\n") =/= <<>> orelse throw({lex_error, Line, {missing_expression, component}}),
+                {binary:part(Rest, 0, Pos), P};
+            {error, unterminated} ->
+                {Rest, none};
+            {error, Error} ->
+                tag_error(Error, Line)
+        end,
+    Name = string:trim(NameText, both, " \t\r\n"),
+    case re:run(Name, "^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$", [{capture, none}]) of
+        match -> {ok, {component_open, Line, Name, Params, TextLine}};
+        nomatch when Name =:= <<>> -> throw({lex_error, Line, {missing_expression, component}});
+        nomatch -> throw({lex_error, Line, {invalid_component_name, Name, Content}})
+    end.
+
+component_close(Rest, Content, Line) ->
+    case string:trim(Rest, both, " \t\r\n") of
+        <<>> -> {ok, {component_close, Line}};
+        _ -> throw({lex_error, Line, {invalid_block_tag, Content}})
+    end.
+
+%% `{: param name :}' / `{: param name, Default :}' at the top of a component file.
+param_tag(Rest, Content, Line, TextLine) ->
+    {NameText, Default} =
+        case weberl_blocks_expr:tag_end(Rest, <<",">>) of
+            {ok, Pos} ->
+                D = binary:part(Rest, Pos + 1, byte_size(Rest) - Pos - 1),
+                string:trim(D, both, " \t\r\n") =/= <<>> orelse throw({lex_error, Line, {missing_expression, param}}),
+                {binary:part(Rest, 0, Pos), D};
+            {error, unterminated} ->
+                {Rest, none};
+            {error, Error} ->
+                tag_error(Error, Line)
+        end,
+    Name = string:trim(NameText, both, " \t\r\n"),
+    case re:run(Name, "^[a-z][a-z0-9_]*$", [{capture, none}]) of
+        match -> {ok, {param, Line, binary_to_atom(Name, utf8), Default, TextLine}};
+        nomatch when Name =:= <<>> -> throw({lex_error, Line, {missing_expression, param}});
+        nomatch -> throw({lex_error, Line, {invalid_block_tag, Content}})
     end.
 
 bare(Kind, Rest, Content, Line) ->
