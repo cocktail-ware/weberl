@@ -81,7 +81,7 @@ ws_version() ->
     with_router(routes(), fun(Name) ->
         Logged = logged(fun() ->
             [begin {ok, Sock, _} = ws_connect(Name, [], Query), ws_close(Sock) end
-             || Query <- ["?v=1", "?v=7", ""]]
+             || Query <- ["?v=" ++ integer_to_list(weberl_live:client_version()), "?v=7", ""]]
         end),
         ?assertMatch([#{channel := ws, declared := ~"7"},
                       #{channel := ws, declared := undefined}], Logged)

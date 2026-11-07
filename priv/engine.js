@@ -23,7 +23,12 @@
  *       event(name, data, topic)  a server push; topic is set when it was published
  *                            to a topic (a snapshot from handle_subscribe/2 is a
  *                            plain page event)
- *       connected(transport) the page is receiving ("ws" | "sse" | "poll")
+ *       connected(transport) the page is receiving ("ws" | "sse" | "poll"); also
+ *                            after every reconnect
+ *       reconnecting()       the connection of a page that WAS connected dropped and
+ *                            the engine is retrying (with backoff, with no limit): it
+ *                            ends in connected(...) or closed(...). Not called for a
+ *                            page that never connected.
  *       transport(name)      the transport in use changed
  *       closed(reason)       the page ended and will not reconnect:
  *                            "closed" (session ended), "replaced" (another
@@ -56,7 +61,7 @@
   // Protocol/build version the client declares to the server (`v' query
   // parameter on every connection start) and a hub announces to the tabs that
   // join it. The server logs a connection whose version it does not know.
-  var VERSION = 1;
+  var VERSION = 2;
   var FAILURES = 3;            // failed connection attempts before falling back
   var BASE_DELAY = 500;        // ms, first reconnect delay
   var MAX_DELAY = 30000;       // ms
@@ -76,6 +81,20 @@
   }
 
   function noop() {}
+
+  // A page is "up" from its connected() until its connection drops. reconnecting()
+  // is only for a page that was up, once per drop.
+  function lost(p) {
+    if (p.up && !p.stopped) {
+      p.up = false;
+      p.sink.reconnecting();
+    }
+  }
+
+  function connectedTo(p, transport) {
+    p.up = true;
+    p.sink.connected(transport);
+  }
 
   function create(options) {
     options = options || {};
@@ -195,6 +214,7 @@
       wsPages().forEach(function (p) {
         p.subscribed = false;
         rejectPending(p, new Error("weberl socket closed"));
+        lost(p);
       });
       if (shut) { return; }
       sockFailures += 1;
@@ -243,7 +263,7 @@
         p.subscribed = true;
         p.failures = 0;
         sockFailures = 0;
-        p.sink.connected("ws");
+        connectedTo(p, "ws");
       } else if (f.event !== undefined) {
         p.sink.event(f.event, f.data);
       } else if (f.closed !== undefined) {
@@ -274,7 +294,7 @@
       es.onopen = function () {
         opened = true;
         p.failures = 0;
-        p.sink.connected("sse");
+        connectedTo(p, "sse");
       };
       es.onmessage = function (ev) {
         var m;
@@ -289,9 +309,10 @@
         // which. With long-poll allowed, ask it: a refusal answers 403/404 there and
         // ends the page as refused, a network failure just goes on polling.
         if (es.readyState === EventSource.CLOSED) {
-          if (p.page.fallback === "poll") { use(p, "poll"); } else { stopPage(p, "refused"); }
+          if (p.page.fallback === "poll") { lost(p); use(p, "poll"); } else { stopPage(p, "refused"); }
           return;
         }
+        lost(p);
         // CONNECTING: EventSource retries by itself; count the attempts that
         // never connected so a broken path can fall back to long-poll.
         if (!opened) {
@@ -328,7 +349,7 @@
         if (body === null || p.stopped || p.abort !== abort) { return; }
         p.failures = 0;
         p.needSnapshot = false;
-        if (!p.polled) { p.polled = true; p.sink.connected("poll"); }
+        if (!p.polled) { p.polled = true; connectedTo(p, "poll"); }
         (body.events || []).forEach(function (e) { p.sink.event(e.event, e.data, e.topic); });
         if (body.closed) { stopPage(p, "closed"); return; }
         // A quick empty answer means this poll was replaced: do not spin.
@@ -337,6 +358,7 @@
       }).catch(function (err) {
         if ((err && err.name === "AbortError") || p.stopped || p.abort !== abort) { return; }
         p.polled = false;
+        lost(p);
         p.needSnapshot = true;
         p.failures += 1;
         p.timer = setTimeout(function () { poll(p); }, backoff(p.failures));
@@ -385,10 +407,11 @@
           sink: {
             event: s.event || noop,
             connected: s.connected || noop,
+            reconnecting: s.reconnecting || noop,
             transport: s.transport || noop,
             closed: s.closed || noop
           },
-          transport: null, failures: 0, subscribed: false, stopped: false,
+          transport: null, failures: 0, subscribed: false, stopped: false, up: false,
           pending: {}, nextRef: 1, source: null, abort: null, timer: null, polled: false,
           needSnapshot: false
         };
@@ -421,13 +444,13 @@
   //   {op: "close", page: id}  {op: "bye"} (the tab is going away)
   // hub -> tab:
   //   {hello: VERSION}  sent once, first: the tab compares it with its own
-  //   {page: id, sink: "event"|"connected"|"transport"|"closed", args: [...]}
+  //   {page: id, sink: "event"|"connected"|"reconnecting"|"transport"|"closed", args: [...]}
   //   {ref, reply} | {ref, error: {reason, status}}   answer to a request
   // A page ends with its tab's "bye" (or "close"): a SharedWorker is not told
   // when a tab disappears without sending one, so those pages live on in the
   // worker until the server ends them.
 
-  var SINKS = ["event", "connected", "transport", "closed"];
+  var SINKS = ["event", "connected", "reconnecting", "transport", "closed"];
 
   function serve(engine, port) {
     var subs = {};

@@ -103,6 +103,7 @@ function recorder() {
       event: (name, data, topic) =>
         log.push(topic === undefined ? ["event", name, data] : ["event", name, data, topic]),
       connected: (t) => log.push(["connected", t]),
+      reconnecting: () => log.push(["reconnecting"]),
       transport: (t) => log.push(["transport", t]),
       closed: (r) => log.push(["closed", r]),
     },
@@ -138,7 +139,7 @@ test("two_way: connects, subscribes with the token and reports connected", () =>
   const rec = recorder();
   h.engine.subscribe(page("p1", "two_way"), rec.sink);
   assert.equal(h.sockets.length, 1);
-  assert.equal(h.sockets[0].url, "ws://example.test/_weberl/ws?v=1");
+  assert.equal(h.sockets[0].url, "ws://example.test/_weberl/ws?v=2");
   assert.deepEqual(rec.log, [["transport", "ws"]]);
   h.sockets[0].open();
   assert.deepEqual(h.sockets[0].sent, [{ op: "subscribe", page: "p1", token: "tok-p1" }]);
@@ -149,7 +150,7 @@ test("two_way: connects, subscribes with the token and reports connected", () =>
 test("two_way: wss when the page is https", () => {
   const h = harness({ protocol: "https:", host: "secure.test" });
   h.engine.subscribe(page("p1", "two_way"), recorder().sink);
-  assert.equal(h.sockets[0].url, "wss://secure.test/_weberl/ws?v=1");
+  assert.equal(h.sockets[0].url, "wss://secure.test/_weberl/ws?v=2");
 });
 
 test("events are delivered to the page named in the frame", () => {
@@ -269,6 +270,71 @@ test("socket loss rejects pending requests, reconnects and resubscribes", async 
   assert.deepEqual(h.sockets[1].sent, [{ op: "subscribe", page: "p1", token: "tok-p1" }]);
 });
 
+test("reconnecting: only for a page that was connected, once per drop, ends in connected", () => {
+  const h = harness();
+  const rec = recorder();
+  h.engine.subscribe(page("p1", "two_way", "none"), rec.sink);
+  // never connected: the failed attempts are not "reconnecting"
+  h.sockets[0].drop();
+  h.tick(250);
+  assert.equal(rec.log.some((e) => e[0] === "reconnecting"), false);
+  h.sockets[1].open();
+  h.sockets[1].message({ page: "p1", subscribed: true });
+  assert.deepEqual(rec.log.at(-1), ["connected", "ws"]);
+  // a drop of the good connection, then several failed retries: one notice
+  h.sockets[1].drop();
+  h.tick(250);
+  h.sockets[2].drop();
+  h.tick(500);
+  h.sockets[3].drop();
+  assert.deepEqual(rec.log.filter((e) => e[0] === "reconnecting"), [["reconnecting"]]);
+  // it keeps retrying without limit and ends in connected
+  h.tick(1000);
+  h.sockets[4].open();
+  h.sockets[4].message({ page: "p1", subscribed: true });
+  assert.deepEqual(rec.log.slice(-2), [["reconnecting"], ["connected", "ws"]]);
+  // and a later drop is announced again
+  h.sockets[4].drop();
+  assert.deepEqual(rec.log.at(-1), ["reconnecting"]);
+});
+
+test("reconnecting: a stream that drops after connecting, then closes for good and polls", async () => {
+  const h = harness();
+  const rec = recorder();
+  h.engine.subscribe(page("p1", "one_way"), rec.sink);
+  h.sources[0].fail();                       // never connected
+  assert.equal(rec.log.some((e) => e[0] === "reconnecting"), false);
+  h.sources[0].open();
+  h.sources[0].fail();                       // EventSource retries by itself
+  h.sources[0].fail();
+  assert.deepEqual(rec.log.filter((e) => e[0] === "reconnecting"), [["reconnecting"]]);
+  h.sources[0].open();
+  assert.deepEqual(rec.log.at(-1), ["connected", "sse"]);
+  // a stream that closes for good falls back to poll: still reconnecting until it polls
+  h.sources[0].fail(true);
+  assert.equal(rec.log.filter((e) => e[0] === "reconnecting").length, 2);
+  assert.deepEqual(rec.log.at(-1), ["transport", "poll"]);
+  h.fetches[0].resolve(reply({ events: [], closed: false }));
+  await flush();
+  assert.deepEqual(rec.log.at(-1), ["connected", "poll"]);
+});
+
+test("reconnecting: a poll that fails after polling well, ends in connected", async () => {
+  const h = harness();
+  const { rec } = polling(h);                // three failed streams: never connected
+  assert.equal(rec.log.some((e) => e[0] === "reconnecting"), false);
+  h.fetches[0].resolve(reply({ events: [{ event: "a", data: 1 }], closed: false }));
+  await flush();
+  h.tick(1000);
+  h.fetches[1].reject(new Error("network"));
+  await flush();
+  assert.deepEqual(rec.log.at(-1), ["reconnecting"]);
+  h.tick(250);
+  h.fetches[2].resolve(reply({ events: [], closed: false }));
+  await flush();
+  assert.deepEqual(rec.log.slice(-2), [["reconnecting"], ["connected", "poll"]]);
+});
+
 test("three failed socket attempts fall back to long-poll when allowed", () => {
   const h = harness();
   const rec = recorder();
@@ -280,7 +346,7 @@ test("three failed socket attempts fall back to long-poll when allowed", () => {
   h.sockets[2].drop();
   assert.deepEqual(rec.log.filter((e) => e[0] === "transport"), [["transport", "ws"], ["transport", "poll"]]);
   assert.equal(h.fetches.length, 1);
-  assert.equal(h.fetches[0].url, "/_weberl/poll/p1?snapshot=1&v=1");
+  assert.equal(h.fetches[0].url, "/_weberl/poll/p1?snapshot=1&v=2");
   assert.equal(h.fetches[0].opts.headers["x-weberl-token"], "tok-p1");
 });
 
@@ -305,7 +371,7 @@ test("one_way: opens a stream with the encoded token and reports events", () => 
   const h = harness();
   const rec = recorder();
   h.engine.subscribe({ id: "a b", token: "t/+=", kind: "one_way", fallback: "poll" }, rec.sink);
-  assert.equal(h.sources[0].url, "/_weberl/sse/a%20b?t=t%2F%2B%3D&v=1");
+  assert.equal(h.sources[0].url, "/_weberl/sse/a%20b?t=t%2F%2B%3D&v=2");
   assert.equal(h.sockets.length, 0, "no socket for a one_way page");
   h.sources[0].open();
   h.sources[0].message({ event: "tick", data: "x" });
@@ -575,7 +641,7 @@ test("sse and poll events carry the topic through", async () => {
 test("poll asks for the snapshots on its first poll and after a failure only", async () => {
   const h = harness();
   polling(h);
-  assert.equal(h.fetches[0].url, "/_weberl/poll/p1?snapshot=1&v=1");
+  assert.equal(h.fetches[0].url, "/_weberl/poll/p1?snapshot=1&v=2");
   h.fetches[0].resolve(reply({ events: [{ event: "a", data: 1 }], closed: false }));
   await flush();
   h.tick(0);
@@ -583,7 +649,7 @@ test("poll asks for the snapshots on its first poll and after a failure only", a
   h.fetches[1].reject(new Error("network"));
   await flush();
   h.tick(250);
-  assert.equal(h.fetches[2].url, "/_weberl/poll/p1?snapshot=1&v=1", "after a gap it asks again");
+  assert.equal(h.fetches[2].url, "/_weberl/poll/p1?snapshot=1&v=2", "after a gap it asks again");
 });
 
 // ---- the shared hub (SharedWorker) -------------------------------------
@@ -633,14 +699,14 @@ test("serve: says hello, runs the tab's pages in the engine and forwards what ha
   const h = harness();
   const { tab, hub } = portPair();
   h.lib.serve(h.engine, hub);
-  assert.deepEqual(hub.posted[0], { hello: 1 });
+  assert.deepEqual(hub.posted[0], { hello: 2 });
   tab.postMessage({ op: "subscribe", page: page("p1", "one_way") });
   assert.equal(h.sources.length, 1);
   h.sources[0].open();
   h.sources[0].message({ event: "tick", data: 1 });
   h.sources[0].message({ event: "t", data: 2, topic: "room" });
   assert.deepEqual(hub.posted, [
-    { hello: 1 },
+    { hello: 2 },
     { page: "p1", sink: "transport", args: ["sse"] },
     { page: "p1", sink: "connected", args: ["sse"] },
     { page: "p1", sink: "event", args: ["tick", 1, undefined] },
@@ -741,7 +807,7 @@ test("shared: a hub running another version is reported and the tab keeps its ow
   const h = harness();
   const log = consoleLog();
   const stale = [];
-  // the worker's hello says version 2 (the engine in this context is 1)
+  // the worker's hello says version 3 (the engine in this context is 2)
   const ctor = function () {
     const { tab, hub } = portPair();
     this.port = tab;
@@ -753,8 +819,8 @@ test("shared: a hub running another version is reported and the tab keeps its ow
   const rec = recorder();
   const sub = hub.subscribe(page("p1", "one_way"), rec.sink);
   const pending = sub.request("early", 1);        // asked before the hub answered
-  ctor.hub.postMessage({ hello: 2 });
-  assert.deepEqual(structuredClone(stale), [{ hub: 2, page: 1 }]);
+  ctor.hub.postMessage({ hello: 3 });
+  assert.deepEqual(structuredClone(stale), [{ hub: 3, page: 2 }]);
   assert.equal(log.warnings.length, 1);
   assert.match(log.warnings[0], /version/);
   // the page now runs in this tab's own engine: its stream, its request

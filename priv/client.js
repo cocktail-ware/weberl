@@ -15,12 +15,17 @@
  * published to a topic; a snapshot from the handler's handle_subscribe/2
  * arrives as a plain event, without one):
  *   Weberl.on("tick", function (data, topic) { ... });
- * (also dispatched on document as "weberl:<name>" CustomEvents, detail = data;
- * "weberl:connected" (detail: transport), "weberl:transport" and
- * "weberl:closed" (detail: reason) report the state).
+ * (also dispatched on document as "weberl:<name>" CustomEvents, detail = data.)
+ *
+ * Weberl's own events: Weberl.on("weberl_connected" | "weberl_reconnecting" |
+ * "weberl_transport" | "weberl_closed" | "weberl_stale", fn). The prefix is reserved:
+ * the server cannot publish a name that starts with "weberl_". On document they are
+ * "weberl:connected" (detail: transport), "weberl:reconnecting", "weberl:transport"
+ * (detail: name), "weberl:closed" (detail: reason) and "weberl:stale".
  *
  * State and start-up: Weberl.state() is "connecting" (until the first connection is
- * up), "connected" or "closed" (ended for good). This script is inserted before the
+ * up), "connected", "reconnecting" (a connection that was up dropped; retrying, ends in
+ * connected or closed) or "closed" (ended for good). This script is inserted before the
  * last </body>, so a script of the layout (even with defer) runs BEFORE it and
  * window.Weberl does not exist yet. Such a script waits for the document event:
  *   if (window.Weberl) { start(); }
@@ -68,13 +73,24 @@
   var handlers = {};
   var transport = null;
   var done = false;
-  var connected = false;
+  var connected = false;       // up now
+  var reconnecting = false;    // was up, dropped, the hub is retrying
 
   // topic is set for events published to a topic (undefined for the page's own
   // events and for snapshots).
   function emit(name, data, topic) {
     (handlers[name] || []).forEach(function (fn) {
       try { fn(data, topic); } catch (e) { console.error("weberl handler failed", e); }
+    });
+    document.dispatchEvent(new CustomEvent("weberl:" + name, { detail: data }));
+  }
+
+  // The events of Weberl itself. Weberl.on knows them as "weberl_<name>" (the
+  // server cannot publish a name with that prefix, so they never clash with the
+  // app's events); the document events keep the plain "weberl:<name>".
+  function emitOwn(name, data) {
+    (handlers["weberl_" + name] || []).forEach(function (fn) {
+      try { fn(data); } catch (e) { console.error("weberl handler failed", e); }
     });
     document.dispatchEvent(new CustomEvent("weberl:" + name, { detail: data }));
   }
@@ -89,7 +105,7 @@
       stale: function (info) {
         console.warn("weberl: the shared hub runs another version of the scripts " +
                      "(hub " + info.hub + ", page " + info.page + "); reload the page");
-        emit("stale", info);
+        emitOwn("stale", info);
       }
     });
   }
@@ -164,9 +180,10 @@
   });
   var sub = hub.subscribe(page, {
     event: onEvent,
-    connected: function (name) { connected = true; emit("connected", name); },
-    transport: function (name) { transport = name; emit("transport", name); },
-    closed: function (reason) { done = true; emit("closed", reason); }
+    connected: function (name) { connected = true; reconnecting = false; emitOwn("connected", name); },
+    reconnecting: function () { connected = false; reconnecting = true; emitOwn("reconnecting"); },
+    transport: function (name) { transport = name; emitOwn("transport", name); },
+    closed: function (reason) { done = true; connected = false; reconnecting = false; emitOwn("closed", reason); }
   });
 
   window.Weberl = {
@@ -181,9 +198,12 @@
     },
     close: function () { sub.close(); },
     // "connecting" until the first connection is up, "connected" while the page
-    // receives, "closed" once it ended for good (the hub reconnects by itself
-    // after a drop and does not report the gap).
-    state: function () { return done ? "closed" : connected ? "connected" : "connecting"; },
+    // receives, "reconnecting" after a connection that was up dropped (the hub
+    // retries without a limit; it ends in connected or closed), "closed" once the
+    // page ended for good.
+    state: function () {
+      return done ? "closed" : reconnecting ? "reconnecting" : connected ? "connected" : "connecting";
+    },
     // Runs fn(Weberl) now. Scripts that may run before this one (a layout script
     // with defer) cannot call it: they listen for "weberl:ready" instead, see above.
     ready: function (fn) { fn(window.Weberl); }

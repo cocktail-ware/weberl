@@ -92,6 +92,7 @@ open(Owner, Kind, Opts) when (Kind =:= one_way orelse Kind =:= two_way), is_map(
 %% (Pages with a session stay local to the node that rendered them.)
 -spec publish(topic(), binary(), iodata()) -> ok.
 publish(Topic, Name, Data) when is_binary(Topic), is_binary(Name) ->
+    ok = check_name(Name),
     Payload = iolist_to_binary(Data),
     Frame = iolist_to_binary(weberl_live_wire:topic_event(Topic, Name, Payload)),
     Message = {weberl_live_topic, Topic, Name, Payload, Frame},
@@ -106,6 +107,7 @@ publish(Topic, Name, Data) when is_binary(Topic), is_binary(Name) ->
 %% raises `error:{unsupported_type, Term}' in the caller, before anything is sent.
 -spec publish_json(topic(), binary(), term()) -> ok.
 publish_json(Topic, Name, Term) when is_binary(Topic), is_binary(Name) ->
+    ok = check_name(Name),
     Json = iolist_to_binary(json:encode(Term)),
     Frame = iolist_to_binary(weberl_live_wire:topic_event_json(Topic, Name, Json)),
     Message = {weberl_live_topic, Topic, Name, {json, Json}, Frame},
@@ -237,9 +239,15 @@ region_failed(Reason, Context) ->
     ?LOG_ERROR(Context#{what => live_region_update_failed, reason => Reason}),
     {error, Reason}.
 
+%% Event names starting with `weberl_' belong to the browser scripts (`weberl_connected',
+%% `weberl_closed'...): the server cannot send them, so they never clash with the app's.
+check_name(<<"weberl_", _/binary>> = Name) -> erlang:error({reserved_event_name, Name});
+check_name(_) -> ok.
+
 %% @doc Push a named event to the page. Buffered if no transport is attached.
 -spec push(page_id(), binary(), iodata()) -> ok | {error, not_found}.
 push(PageId, Name, Data) when is_binary(Name) ->
+    ok = check_name(Name),
     cast(PageId, {push, Name, iolist_to_binary(Data)}).
 
 %% @doc Attach a transport process; any previous transport is told it was
@@ -439,7 +447,7 @@ stats() ->
 %% `priv/engine.js'). Connections declare theirs in the `v' query parameter; the
 %% adapters log the ones that differ.
 -spec client_version() -> pos_integer().
-client_version() -> 1.
+client_version() -> 2.
 
 %% @doc URL of the SSE endpoint of a page.
 -spec sse_path(page_id()) -> string().

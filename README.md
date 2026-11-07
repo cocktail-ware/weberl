@@ -1252,9 +1252,21 @@ tick(PageId) ->
 
 In the browser the beacon turns each event into a `weberl:<name>` `CustomEvent` on
 `document` (`detail` is the data), and `Weberl.on(name, fn)` registers a callback.
-`weberl:connected`, `weberl:transport` and `weberl:closed` report the connection state, and
-`Weberl.state()` answers it at any time: `"connecting"` (until the first connection is up), `"connected"` or
-`"closed"` (ended for good; the hub reconnects by itself after a drop and does not report the gap).
+The connection reports itself with events of Weberl's own: `weberl_connected` (data: the transport, also after
+every reconnect), `weberl_reconnecting`, `weberl_transport`, `weberl_closed` (data: the reason) and `weberl_stale`
+(see below). `Weberl.on("weberl_closed", fn)` registers a callback; on `document` they are the plain
+`weberl:connected`, `weberl:reconnecting`, `weberl:transport`, `weberl:closed` and `weberl:stale` events. The
+`weberl_` prefix is reserved: `push`, `publish` and `publish_json` raise `{reserved_event_name, Name}` for a name
+that starts with it (and a snapshot from `handle_subscribe/2` with one is logged and dropped).
+
+`Weberl.state()` answers the state at any time:
+
+| State | Meaning |
+|---|---|
+| `"connecting"` | no connection has been up yet |
+| `"connected"` | the page is receiving |
+| `"reconnecting"` | a connection that **was** up dropped and the hub is retrying (backoff up to 30 s, **no limit**); it ends in `"connected"` or `"closed"`. A page that never connected stays `"connecting"` while it retries |
+| `"closed"` | the page ended for good (session ended, replaced, refused, `Weberl.close()`) |
 
 The beacon is inserted before the last `</body>`, so a script of your layout, even with `defer`, runs
 before it and `window.Weberl` does not exist yet. Such a script waits for the `weberl:ready` document event
@@ -1265,8 +1277,9 @@ if (window.Weberl) { start(); }
 else { document.addEventListener("weberl:ready", start, { once: true }); }
 ```
 
-`Weberl.ready(fn)` calls `fn(Weberl)` at once, for code that already holds `Weberl`. The names `ready`,
-`connected`, `transport`, `closed` and `stale` are used by Weberl itself: do not publish events with them.
+`Weberl.ready(fn)` calls `fn(Weberl)` at once, for code that already holds `Weberl`. Note that every server
+event also fires `weberl:<name>` on `document`, so an app event called `connected` (or `ready`, `closed`...)
+would fire the same document event as Weberl's own: use `Weberl.on` for those, or other names.
 See `example/src/views/clock/`.
 
 ### Requests from the page
@@ -1520,7 +1533,7 @@ version of the scripts than the tab.
 
 A version mismatch happens when a tab loaded before a deploy meets a worker started after it
 (or the reverse). The tab warns in the console, dispatches a `weberl:stale` event on
-`document` (detail `{hub, page}`; also `Weberl.on("stale", ...)`) so the app can ask the user to
+`document` (detail `{hub, page}`; also `Weberl.on("weberl_stale", ...)`) so the app can ask the user to
 reload, and keeps working on its own connection. The server sees versions too: every
 connection start (the WebSocket, an SSE stream, a long-poll asking for snapshots) declares
 the script version in the `v` query parameter, and one that declares another or none is

@@ -88,6 +88,11 @@ subscribe(Handler, Topic, Context) ->
             try Handler:handle_subscribe(Topic, Context) of
                 ok ->
                     none;
+                {snapshot, <<"weberl_", _/binary>>, _} = Other ->
+                    %% the prefix belongs to the browser scripts, see weberl_live:push/3
+                    ?LOG_ERROR(#{what => live_subscribe_bad_return, handler => Handler,
+                                 topic => Topic, returned => Other, reason => reserved_event_name}),
+                    none;
                 {snapshot, Name, Data} when is_binary(Name) ->
                     {snapshot, Name, iolist_to_binary(Data)};
                 Other ->

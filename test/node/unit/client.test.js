@@ -115,13 +115,36 @@ test("the hub's state is reported as events and kept on Weberl", () => {
   return assert.rejects(t.sandbox.Weberl.request("x", 1), /weberl closed/);
 });
 
-test("state() tells connecting, connected and closed", () => {
+test("Weberl.on knows the framework events by their weberl_ names; app events keep theirs", () => {
+  const t = setup();
+  const seen = [];
+  const W = t.sandbox.Weberl;
+  W.on("weberl_connected", (d) => seen.push(["weberl_connected", d]));
+  W.on("weberl_reconnecting", () => seen.push(["weberl_reconnecting"]));
+  W.on("weberl_closed", (d) => seen.push(["weberl_closed", d]));
+  W.on("connected", (d) => seen.push(["app connected", d]));     // an app event that happens to be called so
+  t.sink().connected("ws");
+  t.sink().reconnecting();
+  t.sink().event("connected", "mine");
+  t.sink().closed("closed");
+  assert.deepEqual(seen, [["weberl_connected", "ws"], ["weberl_reconnecting"], ["app connected", "mine"],
+                          ["weberl_closed", "closed"]]);
+  // the document events keep the plain names
+  assert.deepEqual(t.types().slice(0, 2), ["weberl:connected", "weberl:reconnecting"]);
+});
+
+test("state() tells connecting, connected, reconnecting and closed", () => {
   const t = setup();
   assert.equal(t.sandbox.Weberl.state(), "connecting");
   t.sink().transport("sse");
   assert.equal(t.sandbox.Weberl.state(), "connecting");
   t.sink().connected("sse");
   assert.equal(t.sandbox.Weberl.state(), "connected");
+  t.sink().reconnecting();
+  assert.equal(t.sandbox.Weberl.state(), "reconnecting");
+  t.sink().connected("ws");
+  assert.equal(t.sandbox.Weberl.state(), "connected");
+  t.sink().reconnecting();
   t.sink().closed("closed");
   assert.equal(t.sandbox.Weberl.state(), "closed");
 });
@@ -226,7 +249,7 @@ test("the weberl-region element shows its children", () => {
 test("a stale hub is warned about and reported as an event", () => {
   const t = setup();
   const seen = [];
-  t.sandbox.Weberl.on("stale", (d) => seen.push(d));
+  t.sandbox.Weberl.on("weberl_stale", (d) => seen.push(d));
   t.sharedOptions[0].stale({ hub: 2, page: 1 });
   assert.equal(t.warnings.length, 1);
   assert.match(t.warnings[0], /hub 2, page 1/);

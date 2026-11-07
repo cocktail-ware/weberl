@@ -14,7 +14,7 @@ test("a hub of another version is reported and the tab keeps working on its own 
     await hubScript(page, "/static/hub-v2.js");        // says hello with version 2
 
     await page.goto("/counter");
-    await expect.poll(() => events(page, "stale")).toEqual([{ hub: 2, page: 1 }]);
+    await expect.poll(() => events(page, "stale")).toEqual([{ hub: 3, page: 2 }]);
     expect(warnings.some((w) => /another version/.test(w) || /version/.test(w))).toBe(true);
 
     // the page works anyway, on a connection of its own

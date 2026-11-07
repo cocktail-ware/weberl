@@ -471,3 +471,12 @@ poll() ->
                        ~"closed" => false}, json:decode(Body2)),
         await_members(?ACME, 0)
     end).
+
+%% The prefix weberl_ belongs to the browser scripts (weberl_connected, weberl_closed...).
+reserved_event_names_test() ->
+    ?assertError({reserved_event_name, <<"weberl_closed">>}, weberl_live:publish(<<"t">>, <<"weberl_closed">>, <<"x">>)),
+    ?assertError({reserved_event_name, <<"weberl_x">>}, weberl_live:publish_json(<<"t">>, <<"weberl_x">>, #{})),
+    ?assertError({reserved_event_name, <<"weberl_x">>}, weberl_live:push(<<"p">>, <<"weberl_x">>, <<"x">>)),
+    %% the region event has a colon, not an underscore, and other names are free
+    ?assertEqual(ok, weberl_live:publish(<<"t">>, <<"weberl:region">>, <<"{}">>)),
+    ?assertEqual(ok, weberl_live:publish(<<"t">>, <<"connected">>, <<"x">>)).
