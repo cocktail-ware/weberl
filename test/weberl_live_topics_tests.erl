@@ -33,7 +33,9 @@ topics_test_() ->
       {"ws: a page with a session and topics gets both", fun ws_session_and_topics/0},
       {"sse: snapshot first, then topic events", fun sse/0},
       {"sse: the topic membership ends with the stream", fun sse_leaves/0},
-      {"poll: snapshot on request, topic events, membership ends", fun poll/0}]}.
+      {"poll: snapshot on request, topic events, membership ends", fun poll/0},
+      {"publish_json: the frame carries a value, not a string", fun publish_json_frame/0},
+      {"poll: publish_json data is a value", fun poll_json/0}]}.
 
 %% ---------------------------------------------------------------------
 %% Handlers and routes
@@ -147,6 +149,26 @@ publish_fanout() ->
         ?assertEqual(ok, weberl_live:publish(<<"nobody">>, <<"x">>, <<"y">>))
     end).
 
+publish_json_frame() ->
+    with_connections(2, fun(A, Idle) ->
+        A ! {join, [?ACME]}, Idle ! {join, [?NEWS]},
+        [sync(C) || C <- [A, Idle]],
+        Term = #{running => 2, names => [<<"a">>, <<"b\"">>], ok => true, none => null},
+        ok = weberl_live:publish_json(?ACME, <<"tasks">>, Term),
+        {ok, {weberl_live_topic, ?ACME, <<"tasks">>, {json, _}, Frame}} = received(A),
+        ?assertEqual(#{~"topic" => ?ACME, ~"event" => ~"tasks",
+                       ~"data" => #{~"running" => 2, ~"names" => [~"a", ~"b\""], ~"ok" => true,
+                                    ~"none" => null}},
+                     json:decode(Frame)),
+        ?assertEqual(none, received(Idle)),
+        %% a string stays a string, and a term JSON cannot hold sends nothing
+        ok = weberl_live:publish_json(?ACME, <<"s">>, <<"x">>),
+        {ok, {_, _, _, _, F2}} = received(A),
+        ?assertEqual(~"x", maps:get(~"data", json:decode(F2))),
+        ?assertError(_, weberl_live:publish_json(?ACME, <<"bad">>, self())),
+        ?assertEqual(none, received(A))
+    end).
+
 membership() ->
     with_connections(1, fun(C) ->
         %% two pages on one connection use the topic: one membership, one message
@@ -162,6 +184,22 @@ membership() ->
         ?assertEqual([], pg:get_local_members(weberl_live, {topic, ?ACME})),
         ok = weberl_live:publish(?ACME, <<"e">>, <<"2">>),
         ?assertEqual(none, received(C))
+    end).
+
+poll_json() ->
+    with_router(routes(), fun(Name) ->
+        {Id, Token} = new_page(Name, "/sse"),
+        Path = "/_weberl/poll/" ++ binary_to_list(Id),
+        Headers = [{"x-weberl-token", binary_to_list(Token)}],
+        Self = self(),
+        spawn_link(fun() -> Self ! {polled, request(Name, get, Path, Headers, undefined)} end),
+        await_members(?ACME, 1),
+        ok = weberl_live:publish_json(?ACME, <<"tasks">>, #{running => 3}),
+        {200, _, Body} = receive {polled, R} -> R after 3000 -> error(poll_timeout) end,
+        ?assertEqual(#{~"events" => [#{~"topic" => ?ACME, ~"event" => ~"tasks",
+                                       ~"data" => #{~"running" => 3}}],
+                       ~"closed" => false}, json:decode(Body)),
+        await_members(?ACME, 0)
     end).
 
 %% A second Erlang node (a `peer') runs the weberl application and a stand-in

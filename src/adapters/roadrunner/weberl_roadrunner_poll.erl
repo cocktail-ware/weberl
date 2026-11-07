@@ -118,4 +118,5 @@ flush_topic_events() ->
     end.
 
 event({page, Name, Data}) -> #{event => Name, data => Data};
+event({topic, Topic, Name, {json, Json}}) -> #{topic => Topic, event => Name, data => json:decode(Json)};
 event({topic, Topic, Name, Data}) -> #{topic => Topic, event => Name, data => Data}.

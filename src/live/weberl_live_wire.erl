@@ -53,7 +53,7 @@
 -module(weberl_live_wire).
 
 -export([decode_request/1, decode_frame/1, run_request/2, run_request/3, event/2, event/3,
-         topic_event/3, frame/2]).
+         topic_event/3, topic_event_json/3, frame/2]).
 -export_type([request/0, client_frame/0]).
 
 -type request() :: #{name := binary(), data := term(), ref => binary() | integer()}.
@@ -131,6 +131,13 @@ run_request(PageId, #{kind := Kind, handler := Handler, topics := Topics},
 -spec topic_event(weberl_live:topic(), binary(), binary()) -> iodata().
 topic_event(Topic, Name, Data) ->
     json:encode(#{topic => Topic, event => Name, data => Data}).
+
+%% @doc Like {@link topic_event/3} with `Json' (already encoded JSON text) as the
+%% value of `data', not as a string: the browser receives the decoded value.
+-spec topic_event_json(weberl_live:topic(), binary(), binary()) -> iodata().
+topic_event_json(Topic, Name, Json) ->
+    [<<"{\"topic\":">>, json:encode(Topic), <<",\"event\":">>, json:encode(Name),
+     <<",\"data\":">>, Json, $}].
 
 %% @doc A pushed event for a transport that carries one page (the SSE stream):
 %% `{"event": Name, "data": Data}'.

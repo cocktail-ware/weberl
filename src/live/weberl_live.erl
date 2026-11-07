@@ -41,7 +41,7 @@
 %% on the next attach. Stopping a router closes the sessions of its listener.
 -module(weberl_live).
 
--export([open/2, open/3, new_page_id/0, downgrade/2, push/3, publish/3, attach/2, detach/2, release/2, request/3,
+-export([open/2, open/3, new_page_id/0, downgrade/2, push/3, publish/3, publish_json/3, attach/2, detach/2, release/2, request/3,
          close/1, close_owner/1, whereis/1, info/1, poll_enabled/1, channels/1,
          check_topics/1, topics/2, client_path/0, engine_path/0, client_version/0,
          sse_path/1, update/3, update_topic/4, update_topic/5, region_event/3, region_event/4,
@@ -95,6 +95,20 @@ publish(Topic, Name, Data) when is_binary(Topic), is_binary(Name) ->
     Payload = iolist_to_binary(Data),
     Frame = iolist_to_binary(weberl_live_wire:topic_event(Topic, Name, Payload)),
     Message = {weberl_live_topic, Topic, Name, Payload, Frame},
+    _ = [Pid ! Message || Pid <- pg:get_members(?SCOPE, {topic, Topic})],
+    ok.
+
+%% @doc Like {@link publish/3} for structured data: `Term' is encoded as JSON
+%% (`json:encode/1': maps, lists, binaries, numbers, booleans, `null') and the
+%% browser receives the decoded value, not a string to parse again:
+%% `Weberl.on("tasks", function (data) { data.running ... })', and `event.detail'
+%% of `weberl:tasks' is the value. A term JSON cannot hold raises `badarg'/an
+%% error from `json:encode/1' in the caller, nothing is sent.
+-spec publish_json(topic(), binary(), term()) -> ok.
+publish_json(Topic, Name, Term) when is_binary(Topic), is_binary(Name) ->
+    Json = iolist_to_binary(json:encode(Term)),
+    Frame = iolist_to_binary(weberl_live_wire:topic_event_json(Topic, Name, Json)),
+    Message = {weberl_live_topic, Topic, Name, {json, Json}, Frame},
     _ = [Pid ! Message || Pid <- pg:get_members(?SCOPE, {topic, Topic})],
     ok.
 

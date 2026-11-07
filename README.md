@@ -1300,6 +1300,11 @@ page subscribed to it receives the event:
 weberl_live:publish(<<"stock:ACME">>, <<"price">>, <<"101.5">>).
 ```
 
+`publish/3` delivers a string. For structured data use `weberl_live:publish_json(Topic, Name, Term)`: the term
+is encoded once with `json:encode/1` and the browser gets the decoded value (`Weberl.on("tasks", function (d) {
+d.running })`, `event.detail` of `weberl:tasks`), with no `JSON.parse` on the page. It works on every
+transport, long-poll included.
+
 There is no replay, buffering or sequence number: a client that is not connected misses
 the event (a fire-and-forget fan-out). The frame is encoded once and the connection
 processes (the WebSocket handler, the SSE loop) are members of a `pg` group per topic, so a
