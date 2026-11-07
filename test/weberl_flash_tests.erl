@@ -295,3 +295,33 @@ http_flow(Name) ->
 http_untouched(Name) ->
     {200, H, <<"#{}">>} = get(Name, "/home", none),
     ?assertEqual([], proplists:get_all_values("set-cookie", H)).
+
+%% Feedback from agentic (migration note 1): login needs reset_session and a flash.
+reset_session_keeps_the_flash_this_response_put_test() ->
+    Login = fun(Order) ->
+                    fun(_) ->
+                            R = redirect(),
+                            case Order of
+                                put_first -> weberl_flash:put(weberl_response:reset_session(R), ok, <<"Created">>);
+                                reset_last -> weberl_response:reset_session(weberl_flash:put(R, ok, <<"Created">>))
+                            end
+                    end
+            end,
+    [begin
+         {_, Jar, _} = page(undefined, Login(Order)),
+         {Flash, _, _} = page(Jar, fun(Req) -> {weberl_flash:get(Req), base()} end),
+         ?assertEqual(#{ok => <<"Created">>}, Flash)
+     end || Order <- [put_first, reset_last]].
+
+reset_session_drops_the_flash_the_request_delivered_test() ->
+    {_, Jar0, _} = page(undefined, fun(_) -> weberl_flash:put(redirect(), old, <<"o">>) end),
+    {_, Jar1, _} = page(Jar0, fun(_) -> weberl_response:reset_session(redirect()) end),
+    {Flash, _, _} = page(Jar1, fun(Req) -> {weberl_flash:get(Req), base()} end),
+    ?assertEqual(#{}, Flash),
+    %% and keep/2 brings it back, next to the new one
+    {_, Jar2, _} = page(Jar0, fun(Req) ->
+                                      R = weberl_flash:put(weberl_response:reset_session(redirect()), new, <<"n">>),
+                                      weberl_flash:keep(Req, R)
+                              end),
+    {Both, _, _} = page(Jar2, fun(Req) -> {weberl_flash:get(Req), base()} end),
+    ?assertEqual(#{old => <<"o">>, new => <<"n">>}, Both).

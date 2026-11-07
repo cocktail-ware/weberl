@@ -658,7 +658,7 @@ logout(_Request) ->
 |---|---|
 | `weberl_request:session/1`, `session_get/2` | the session the browser sent: a map (`#{}` when missing, tampered with or expired); `{ok, V} \| error` |
 | `weberl_response:put_session/3`, `delete_session/2` | change one key |
-| `weberl_response:set_session/2`, `reset_session/1` | replace the whole session / empty it (the cookie is deleted); both start a new lifetime |
+| `weberl_response:set_session/2`, `reset_session/1` | replace the whole session / empty it (the cookie is deleted); both start a new lifetime. `reset_session` keeps the flash this response already `put` (a login: reset + "Account created", in either order) but drops the one the request delivered (`weberl_flash:keep/2` restores it) |
 | `weberl_response:session_ttl/2` | seconds from now, or `infinity` (no server-side expiry; the cookie lasts 400 days, a browser's maximum) |
 | `weberl_response:session/1`, `session_get/2` | what this response will send: after `put_session(R, K, V)`, `session_get(R, K)` is `{ok, V}` and every other key is still there |
 | `weberl_response:load_session/2` | start from a request's session explicitly |

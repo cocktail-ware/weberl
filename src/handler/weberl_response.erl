@@ -165,9 +165,19 @@ set_session(#response{} = R, Map) when is_map(Map) ->
 
 %% @doc Empty the session: its cookie is deleted (log out; also the first step of a
 %% login, so nothing of an earlier session carries over).
+%%
+%% The one exception is the flash this response itself put ("Account created"):
+%% it is for the next page and survives, so `put' and `reset_session' work in either
+%% order. The flash the request delivered is dropped with the rest of the old session
+%% (`weberl_flash:keep/2' puts it back).
 -spec reset_session(t()) -> t().
 reset_session(#response{} = R) ->
-    set_session(R, #{}).
+    Own = weberl_flash:own(R),
+    R1 = set_session(R, #{}),
+    case map_size(Own) of
+        0 -> R1;
+        _ -> maps:fold(fun(K, V, Acc) -> weberl_flash:put(Acc, K, V) end, R1, Own)
+    end.
 
 %% @doc How long this session lives from now, in seconds, or `infinity' (no
 %% server-side expiry; the cookie lasts 400 days, a browser's maximum). Starts a

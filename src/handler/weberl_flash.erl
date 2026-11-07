@@ -31,7 +31,7 @@
 
 -compile({no_auto_import, [get/1]}).
 
--export([put/3, get/1, get/2, take/2, keep/2]).
+-export([put/3, get/1, get/2, take/2, keep/2, own/1]).
 
 -define(KEY, '$weberl_flash').
 
@@ -77,6 +77,23 @@ keep(Request, Response) ->
     case maps:merge(Delivered, Held) of
         Held -> Response;
         Merged -> store(Response, Merged)
+    end.
+
+%% @private For {@link weberl_response:reset_session/1}: the flash this response put
+%% itself, i.e. what it holds minus what the request delivered. Reads nothing (and
+%% needs no request) when the response has not touched the session yet.
+-spec own(weberl_response:t()) -> map().
+own(Response) ->
+    case weberl_response:session(Response) of
+        undefined ->
+            #{};
+        _ ->
+            Held = current(Response),
+            Delivered = case weberl_session:ambient() of
+                            {ok, Request} -> get(Request);
+                            none -> #{}
+                        end,
+            maps:filter(fun(K, V) -> maps:find(K, Delivered) =/= {ok, V} end, Held)
     end.
 
 %% ---------------------------------------------------------------------
