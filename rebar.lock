@@ -1,1 +1,4 @@
-[].
+[{<<"erl_file_reloader">>,
+  {git,"https://github.com/cocktail-ware/erl_file_loader.git",
+       {ref,"91aef110be660f2997281f72119ff4ce33d158f2"}},
+  0}].

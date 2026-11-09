@@ -1305,13 +1305,40 @@ they are now and swaps them into the running router: the same listener and port,
 connections and live pages stay. It runs the same checks as a start (handlers, limits,
 route conflicts, template compilation, links against the new table); if any fails it
 returns `{error, Reason}` and the old table and templates keep serving. It reads the
-code that is loaded: compile and load changed modules first (a code reloader does that;
+code that is loaded: compile and load changed modules first (a code reloader does that, see
+below;
 a handler's own code needs no reload step, as it is called by module name), and a view that
 was just added needs its beam loadable. The router and listener records (directories,
 port, static mounts, limits at the router level) are read once at start: changing them is
 a restart. A live page that is already open renders its next update with the new
 template. The adapter does the swap through the optional callback `reload_routes/3`
 (Roadrunner implements it with `roadrunner_listener:reload_routes/2`).
+
+##### Reloading on file changes (development)
+
+[`erl_file_reloader`](https://github.com/cocktail-ware/erl_file_loader) watches files, runs a
+build, reloads the changed beams and calls hooks. Weberl lists it in its `deps` (it does not use
+it, and it is not in Weberl's `applications`), so an application that depends on Weberl has it;
+start it in your dev profile with the hook `{weberl, reload, [Name]}`:
+
+```erlang
+erl_file_reloader:start_link(#{
+    watches => [
+        {code, #{directories => ["src"], extensions => [".erl", ".hrl"],
+                 files => ["rebar.config"],
+                 build => {"rebar3", ["compile"]}, load => beams}},
+        {templates, #{directories => ["src/views", "src/layouts"],
+                      extensions => [".weberl"]}}],
+    on_change => [{weberl, reload, [my_router]}]}).
+```
+
+Edit a template, a layout or a view's source (or add a view) and the next request serves it, with
+the listener, connections and live pages untouched. A template that does not compile is logged
+(`hook_failed`, with the template error) and the old page keeps serving until the next edit. The
+`example/` application does this when `{reload, true}` is set (`example/config/sys.config`, which
+`rebar3 shell` uses); see `example/src/example_sup.erl`. Put the reloader under your own
+supervisor, after the router, so it only runs in development. See the library's README for the
+options (purge mode, debounce, build timeout).
 
 The engine can be used on its own: `compile_file/2`, `compile_source/3`,
 `load/1`, `discover/1` and `associate/2` in `weberl_template`.
@@ -1772,6 +1799,10 @@ Locally:
 cd example
 rebar3 shell          # fetches roadrunner, starts the app on http://localhost:8080
 ```
+
+The example runs with `erl_file_reloader` (`example/config/sys.config`): edit a view, a template or
+the layout under `example/src` and reload the page, no restart (see
+[Reloading on file changes](#reloading-on-file-changes-development)).
 
 Then open `http://localhost:8080/`, `/about`, `/health`, and the live pages: `/clock` (the
 server pushes the time every second, one-way) and `/counter` (two-way, with

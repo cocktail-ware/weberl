@@ -564,6 +564,19 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   purge-safe) and call `{M,F,A}` hooks; agentic's `erl_auto_recompiler` is the prior art (gaps noted: beams under
   `_build/default/checkouts` are not matched, `load_abs` can fail with `not_purged`, no hooks, no `.weberl`
   watching). Watcher stays polling in v1, swappable module. Weberl's part is only `weberl:reload/1`.
+- **`erl_file_reloader` built and used (2026-11-09).** Local clone `~/code/erl_file_reloader`, GitHub repo
+  `cocktail-ware/erl_file_loader` (the repo name differs from the app name; decisions in its `DESIGN.md`,
+  usage in its `README.md`, 76 tests). Named watches in one `gen_statem`, polling with a content hash for
+  recent files, a build port with timeout (kills the process group), `code:atomic_load` with configurable
+  `soft`/`hard` purge, `{M,F,A}` hooks run in monitored processes with the summary appended (falling back to
+  the arity without it, so `{weberl, reload, [Name]}` works as it is). Weberl does not use it, but lists it in
+  its default `deps` (git, branch `main`, locked in `rebar.lock`; not in Weberl's `applications`) so that an
+  application depending on Weberl gets it with the same update and starts it in dev. Used here by
+  `test/weberl_file_reloader_tests.erl` (3 tests: edit a template, edit a view's source, add a view; the page
+  changes with no explicit reload) and by the example (`example_sup` starts it when `{reload, true}`, set in
+  `example/config/sys.config`, which `rebar3 shell` loads). Smoke-tested by hand in a container: template,
+  view source and layout edits showed in about a second, a template that did not compile kept the old page.
+  **Still to do**: wire it into agentic in place of `erl_auto_recompiler` (agentic can keep `purge => hard`).
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)

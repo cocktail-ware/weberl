@@ -1,4 +1,8 @@
-[{<<"roadrunner">>,
+[{<<"erl_file_reloader">>,
+  {git,"https://github.com/cocktail-ware/erl_file_loader.git",
+       {ref,"91aef110be660f2997281f72119ff4ce33d158f2"}},
+  0},
+ {<<"roadrunner">>,
   {git,"https://github.com/arizona-framework/roadrunner",
        {ref,"ea3e48c5e5027a106381cd3148cba373c378b921"}},
   0}].
