@@ -28,7 +28,10 @@
 %% == The router ==
 %% `router_path/1,2' and `router_url/1,2' check the path against the route table of a
 %% router. Which router: the `router' option, else the router of the current
-%% request (set with {@link with_router/2}, which dispatch and live sessions do).
+%% request: dispatch sets its route table with {@link with_router/2} around the handler,
+%% so handler code (a redirect target, a form action) needs no router name. Other
+%% processes (a live session, an agent's task) have none: use the `router' option.
+%% `router' and `with_router/2' take a router's name or a route table.
 %% The table holds static paths only (dynamic paths: ROADMAP.md).
 -module(weberl_url).
 
@@ -38,7 +41,10 @@
 -export([router_path_parts/2, router_url_parts/2, router_path_known/3, router_url_known/3]).
 -export([is_tagged/1, kind/1, data/1]).
 -export([with_router/2, ambient_router/0]).
--export_type([tagged/0, kind/0]).
+-export_type([tagged/0, kind/0, router/0]).
+
+%% a running router's name, or its route table
+-type router() :: atom() | weberl_table:t().
 
 -type kind() :: path | url | component | query | router_path | router_url | unsafe.
 -type tagged() :: {weberl_url, kind(), binary()}.
@@ -220,11 +226,14 @@ tag(Kind, Bin) -> {weberl_url, Kind, Bin}.
 %% ---------------------------------------------------------------------
 %% The router of the current request
 
-%% @doc Run `Fun' with `Name' as the router of the current process (what
+%% @doc Run `Fun' with `Router' as the router of the current process (what
 %% `router_path' and `router_url' check against), restoring the previous one after.
--spec with_router(atom(), fun(() -> Result)) -> Result.
-with_router(Name, Fun) when is_atom(Name), is_function(Fun, 0) ->
-    Old = erlang:put(?ROUTER_KEY, Name),
+%% `Router' is the name of a running router or its route table (dispatch uses the
+%% table, so handler code needs no name).
+-spec with_router(router(), fun(() -> Result)) -> Result.
+with_router(Router, Fun) when is_function(Fun, 0) ->
+    is_router(Router) orelse erlang:error(function_clause),
+    Old = erlang:put(?ROUTER_KEY, Router),
     try Fun()
     after
         case Old of
@@ -234,8 +243,11 @@ with_router(Name, Fun) when is_atom(Name), is_function(Fun, 0) ->
     end.
 
 %% @doc The router of the current process, if one was set.
--spec ambient_router() -> atom() | undefined.
+-spec ambient_router() -> router() | undefined.
 ambient_router() -> erlang:get(?ROUTER_KEY).
+
+is_router(Name) when is_atom(Name) -> true;
+is_router(Table) -> weberl_table:is_table(Table).
 
 %% ---------------------------------------------------------------------
 %% Internal
@@ -303,8 +315,7 @@ check_opts(Opts) when is_map(Opts) ->
         Other -> fail({bad_url_option, {no_warn, Other}})
     end,
     case maps:get(router, Opts, undefined) of
-        R when is_atom(R) -> ok;
-        Other2 -> fail({bad_url_option, {router, Other2}})
+        R -> is_router(R) orelse fail({bad_url_option, {router, R}})
     end,
     Opts;
 check_opts(Opts) -> fail({bad_url_option, Opts}).
@@ -330,14 +341,19 @@ route(Path, Opts) ->
     end.
 
 table(Opts) ->
-    Name = case maps:get(router, Opts, undefined) of
-               undefined -> ambient_router();
-               Given -> Given
-           end,
-    Name =/= undefined orelse fail(no_router),
-    case weberl_router_server:table(Name) of
-        {ok, Table} -> Table;
-        {error, not_running} -> fail({router_not_running, Name})
+    Router = case maps:get(router, Opts, undefined) of
+                 undefined -> ambient_router();
+                 Given -> Given
+             end,
+    Router =/= undefined orelse fail(no_router),
+    case is_atom(Router) of
+        false ->
+            Router;
+        true ->
+            case weberl_router_server:table(Router) of
+                {ok, Table} -> Table;
+                {error, not_running} -> fail({router_not_running, Router})
+            end
     end.
 
 public_url() ->

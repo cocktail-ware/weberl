@@ -111,14 +111,17 @@ form_error(_Other) -> text(400, <<"Bad Request">>).
 
 %% @doc A redirect with status `303 See Other', the right answer after a form POST
 %% (the browser follows with a GET). See {@link redirect/2}.
--spec redirect(iodata()) -> t().
+-spec redirect(iodata() | weberl_url:tagged()) -> t().
 redirect(Location) -> redirect(303, Location).
 
 %% @doc A redirect with a `location' header and an empty body. `Status' is one of
 %% 301, 302, 303, 307, 308. The location must not contain control characters
 %% (`badarg'). Weberl does not restrict where it points: when the target comes from
 %% the client (`?next=...'), check it first with {@link weberl_url:local/1}.
--spec redirect(301 | 302 | 303 | 307 | 308, iodata()) -> t().
+-spec redirect(301 | 302 | 303 | 307 | 308, iodata() | weberl_url:tagged()) -> t().
+redirect(Status, {weberl_url, Kind, Data}) when Kind =:= router_path; Kind =:= router_url; Kind =:= path ->
+    %% a checked path from `weberl_url' (`router_path/1,2', `router_url/1,2', `ensure_path/1')
+    redirect(Status, Data);
 redirect(Status, Location) when Status =:= 301; Status =:= 302; Status =:= 303;
                                 Status =:= 307; Status =:= 308 ->
     L = header_value(Location),

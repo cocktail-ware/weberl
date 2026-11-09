@@ -13,7 +13,7 @@
 %% </ol>
 -module(weberl_table).
 
--export([assemble/2, lookup/2, match/2, handler/2, routes/1, shadowed/1, with_limits/2, limits/1]).
+-export([assemble/2, lookup/2, match/2, handler/2, routes/1, shadowed/1, with_limits/2, limits/1, is_table/1]).
 -export_type([t/0, params/0]).
 -export_record([table]).
 
@@ -122,6 +122,11 @@ with_limits(#table{} = T, Limits) when is_map(Limits) -> T#table{limits = Limits
 %% @doc The form limits of the router (`#{}' when it sets none).
 -spec limits(t()) -> weberl_limits:limits().
 limits(#table{limits = L}) -> L.
+
+%% @doc Whether a term is a route table.
+-spec is_table(term()) -> boolean().
+is_table(#table{}) -> true;
+is_table(_) -> false.
 
 %% @doc Declarative routes dropped because a filesystem route has the same path.
 -spec shadowed(t()) -> [weberl_route:t()].

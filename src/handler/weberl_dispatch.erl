@@ -33,7 +33,7 @@ dispatch(Request0, Table) ->
                     Request = weberl_request:with_route(weberl_request:with_params(Request0, Params),
                                                         #{handler => weberl_route:handler(Route), limits => Limits,
                                                           data => weberl_route:data(Route)}),
-                    routed(Route, Request);
+                    weberl_url:with_router(Table, fun() -> routed(Route, Request) end);
                 error ->
                     %% a `%' that is not an escape, or a value that is not UTF-8
                     ?LOG_WARNING(#{what => invalid_path_parameter,

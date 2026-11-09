@@ -934,6 +934,14 @@ process (a request, a live page, an agent's task).
 returns what the compiler warned about, and the router named by `weberl_url:with_router/2` (or the
 `router` option) answers at render time.
 
+In Erlang code, `weberl_url:router_path/1,2` and `router_url/1,2` check against the route table of the
+router that dispatched the request, so a handler (including a live page's) can build a checked redirect
+target without knowing its router's name: `weberl_response:redirect(weberl_url:router_path("/agents"))`.
+`redirect/1,2` accept the tagged value of `router_path`, `router_url` and `ensure_path` (not `url` or
+`unsafe_url`: a target from the client is checked with `weberl_url:local/1`). Code that runs outside a
+request (a live session process, an agent's task) has no router: pass `#{router => NameOrTable}`.
+`with_router/2` and the `router` option take a running router's name or a route table.
+
 ### Conditionals, case and loops
 
 Blocks take Erlang: conditions, patterns and generators are Erlang expressions, with assigns written

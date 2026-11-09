@@ -537,6 +537,13 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
      body belong to the caller's view. Errors: `{unknown_fill, Name, Component}`, `{duplicate_fill, ..}`,
      `{fill_not_top_level, Name}`, `{component_without_content, C}`, `{duplicate_slot, ..}`, `{slot_in_slot, ..}`,
      `{content_in_slot, ..}`, `{region_in_component, Name}`, `{duplicate_content, C}`.
+- **Feedback round 4 (agentic, 2026-11-08), item 6 done (2026-11-09, not committed).** Cause: nothing ever called
+  `weberl_url:with_router/2` (decision 9 was revised to embed routes in templates, the moduledoc still claimed dispatch
+  set it). Now `weberl_dispatch` runs the request under `with_router(Table, ...)`; `with_router/2` and the `router`
+  option accept a router name or a `weberl_table:t()` (`weberl_table:is_table/1`); `weberl_response:redirect/1,2`
+  accept a tagged `router_path`/`router_url`/`path` value. Processes outside a request (live session, tasks) still
+  have no ambient router. Tests: `weberl_ambient_router_tests` (1120 eunit tests). Open from the round: 1, 2 (design),
+  3 (assign clash with the layout), 4 (verify a set of paths), 5 (UTF-8 message).
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)
