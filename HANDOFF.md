@@ -544,6 +544,12 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   accept a tagged `router_path`/`router_url`/`path` value. Processes outside a request (live session, tasks) still
   have no ambient router. Tests: `weberl_ambient_router_tests` (1120 eunit tests). Open from the round: 1, 2 (design),
   3 (assign clash with the layout), 4 (verify a set of paths), 5 (UTF-8 message).
+  **5 done** (`{invalid_utf8_value, View, Source, Value}`, `f7cd464`). **3 decided (user, 2026-11-09): the clash is
+  agentic's** (`agentic_web:html/3` merges its `tasks` widget state over the view's; Weberl shares one assigns map
+  by design and never sees the merge, so no namespace change). Done on the Weberl side: a `for` over a non-list raises
+  `{template_error, {bad_generator, View, Line, Source, Value}}` (Source = the qualifiers as written); known side
+  effect: the same Erlang error raised by a function the body calls is reported at the `for` too. Agentic should
+  rename its widget assign (e.g. `task_state`).
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)

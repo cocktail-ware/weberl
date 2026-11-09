@@ -72,7 +72,7 @@ The generator produces Erlang abstract forms, which Weberl compiles into a modul
 |---|---|
 | `if` / `elif` / `else` | nested `case Cond of true -> ..; false -> ..; V -> error({template_error, {not_boolean, View, Line, V}}) end` |
 | `case` | a native `case` with the clauses as written, plus a last clause raising `{template_error, {case_clause, View, Line, V}}` |
-| `for` | a list comprehension `[Body \|\| Qualifiers]`; with `empty`: `case [..] of [] -> Empty; Items -> Items end` |
+| `for` | a list comprehension `[Body \|\| Qualifiers]`; with `empty`: `case [..] of [] -> Empty; Items -> Items end`; wrapped in a `try` that turns `{bad_generator, V}` into `{template_error, {bad_generator, View, Line, Source, V}}` |
 | `{{ Expr }}` | a call of the host's value renderer on the expression |
 
 The body of a block is an iodata expression (a list of text and rendered parts), so a comprehension yields a list

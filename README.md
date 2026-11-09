@@ -1054,10 +1054,12 @@ weberl_template:try_render(home_view, Assigns) -> {ok, iodata()} | {error, Reaso
 Name}`, `{unsupported_value, View, Source, Value}` (`Source` is the expression as written,
 for example `<<"@title">>`), `{invalid_utf8_value, View, Source, Value}` (a binary or string that is not
 UTF-8; usually a binary literal with characters above Latin-1 written without `/utf8`: `<<"✓"/utf8>>`),
-`{not_boolean, View, Line, Value}` and `{case_clause, View, Line, Value}`
+`{not_boolean, View, Line, Value}`, `{case_clause, View, Line, Value}` and
+`{bad_generator, View, Line, Source, Value}` (a `for` over something that is not a list; `Source` is the
+qualifiers as written, `<<"Row <- @tasks">>`, so a value replaced by another assign of the same name
+is found from the log)
 (see [blocks](#conditionals-case-and-loops)), `{invalid_assigns, View, Assigns}` or `{no_template, View}`.
-An expression that raises (a `for` over something that is not a list, a division by zero) propagates as
-the Erlang error. Inside a handler any of these becomes a logged 500. `try_render/2` and
+Any other expression that raises (a division by zero) propagates as the Erlang error. Inside a handler any of these becomes a logged 500. `try_render/2` and
 `try_render_region/3` (what a live page uses to re-render a region) return the failure instead, an
 expression that raises as `{error, {render_failed, Class, Reason}}`, so one bad value is logged and does
 not end the page's session.

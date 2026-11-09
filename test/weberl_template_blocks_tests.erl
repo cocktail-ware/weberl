@@ -213,17 +213,34 @@ the_condition_of_a_filter_can_raise_test() ->
     ?assertEqual({missing_variable, V, min},
                  render_error(fun() -> weberl_template:render(V, #{l => [1]}) end)).
 
-a_value_that_is_not_a_list_is_erlangs_error_test() ->
-    V = tpl(<<"{: for X <- @l :}{{ X }}{: /for :}">>),
-    ?assertError({bad_generator, notalist}, weberl_template:render(V, #{l => notalist})).
+%% agentic: a layout's assign replaced the view's `tasks' list with a map and the 500 said
+%% only `{bad_generator, #{...}}'. The error names the view, the line and the generator.
+a_value_that_is_not_a_list_names_the_generator_test() ->
+    V = tpl(<<"a\n{: for X <- @l :}{{ X }}{: /for :}">>),
+    ?assertEqual({bad_generator, V, 2, <<"X <- @l">>, notalist},
+                 render_error(fun() -> weberl_template:render(V, #{l => notalist}) end)),
+    ?assertEqual({bad_generator, V, 2, <<"X <- @l">>, #{a => 1}},
+                 render_error(fun() -> weberl_template:render(V, #{l => #{a => 1}}) end)).
+
+the_generator_is_named_with_an_empty_branch_and_several_qualifiers_test() ->
+    V = tpl(<<"{: for X <- @l, X > 1 :}{{ X }}{: empty :}none{: /for :}">>),
+    ?assertEqual({bad_generator, V, 1, <<"X <- @l, X > 1">>, nope},
+                 render_error(fun() -> weberl_template:render(V, #{l => nope}) end)),
+    ?assertEqual(<<"none">>, render(<<"{: for X <- @l, X > 1 :}{{ X }}{: empty :}none{: /for :}">>, #{l => [1]})).
+
+%% a loop inside a loop: the one whose list is wrong is named
+the_inner_loop_is_the_one_named_test() ->
+    V = tpl(<<"{: for R <- @rows :}{: for C <- R :}{{ C }}{: /for :}{: /for :}">>),
+    ?assertEqual({bad_generator, V, 1, <<"C <- R">>, 7},
+                 render_error(fun() -> weberl_template:render(V, #{rows => [[1], 7]}) end)).
 
 %% render/2 raises (a handler's 500); the try_ variants, which a live page uses to
 %% re-render a region, return the failure so one bad value does not end the session.
 the_try_variants_return_a_failing_expression_test() ->
     V = tpl(<<"{: region r :}{: for X <- @l :}{{ X }}{: /for :}{: /region r :}">>),
-    ?assertEqual({error, {render_failed, error, {bad_generator, notalist}}},
+    ?assertEqual({error, {bad_generator, V, 1, <<"X <- @l">>, notalist}},
                  weberl_template:try_render(V, #{l => notalist})),
-    ?assertEqual({error, {render_failed, error, {bad_generator, notalist}}},
+    ?assertEqual({error, {bad_generator, V, 1, <<"X <- @l">>, notalist}},
                  weberl_template:try_render_region(V, r, #{l => notalist})),
     ?assertEqual({error, {render_failed, error, badarith}},
                  weberl_template:try_render(tpl(<<"{{ 1 div @z }}">>), #{z => 0})),

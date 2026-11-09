@@ -165,9 +165,11 @@ part({'case', Line, #{form := Form}, Clauses}, View) ->
             {call, Line, Fun, [Read(N, Line) || N <- GuardAssigns]}
     end;
 %% `for': a list comprehension building the pieces; `empty' when it built none.
-part({'for', Line, #{qualifiers := Quals}, Body, Empty}, View) ->
+part({'for', Line, #{qualifiers := Quals} = Parsed, Body, Empty}, View) ->
     Hooks = hooks(View),
-    Comprehension = {lc, Line, body(Body, View), weberl_blocks_expr:render(Quals, Hooks)},
+    Comprehension = bad_generator(
+                      {lc, Line, body(Body, View), weberl_blocks_expr:render(Quals, Hooks)},
+                      Line, maps:get(source, Parsed, <<>>), View),
     case Empty of
         none ->
             Comprehension;
@@ -176,6 +178,21 @@ part({'for', Line, #{qualifiers := Quals}, Body, Empty}, View) ->
              [{clause, Line, [{nil, Line}], [], [body(Empty, View)]},
               {clause, Line, [{var, Line, 'Items'}], [], [{var, Line, 'Items'}]}]}
     end.
+
+%% Erlang's `{bad_generator, Value}' says nothing of where it came from; a template error
+%% names the view, the line and the qualifiers (`Row <- @tasks'), so a value of the wrong
+%% type (an assign another map replaced, say) is found from the log. (An error of the same
+%% shape raised by a function the body calls is reported at this `for' too.)
+bad_generator(Comprehension, Line, Source, View) ->
+    Pattern = {tuple, Line, [{atom, Line, error},
+                             {tuple, Line, [{atom, Line, bad_generator}, {var, Line, 'W_bad'}]},
+                             {var, Line, '_'}]},
+    Raise = {call, Line, {remote, Line, {atom, Line, erlang}, {atom, Line, error}},
+             [{tuple, Line, [{atom, Line, template_error},
+                             {tuple, Line, [{atom, Line, bad_generator}, {atom, Line, View},
+                                            {integer, Line, Line}, {bin, Line, [{bin_element, Line, {string, Line, binary_to_list(Source)}, default, default}]},
+                                            {var, Line, 'W_bad'}]}]}]},
+    {'try', Line, [Comprehension], [], [{clause, Line, [Pattern], [], [Raise]}], []}.
 
 if_chain([{#{form := Form, line := CondLine}, Children} | Rest], Else, Line, View) ->
     Cond = weberl_blocks_expr:render(Form, hooks(View)),
