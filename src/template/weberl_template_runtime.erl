@@ -9,7 +9,9 @@
 %% atoms (rendered as their name, so `true', `false' and `undefined' render as
 %% such). Any other value raises
 %% `error({template_error, {unsupported_value, View, Source, Value}})', `Source'
-%% being the text of the expression (arbitrary terms are never rendered).
+%% being the text of the expression (arbitrary terms are never rendered). Text that
+%% is not valid UTF-8 (a binary or character list) raises
+%% `{invalid_utf8_value, View, Source, Value}' instead.
 %%
 %% `escaped/3' escapes `& < > " ''. `raw/3' does not and is unsafe for
 %% untrusted input.
@@ -135,12 +137,18 @@ esc(C) -> <<C>>.
 to_binary(V, View, Source) when is_binary(V) ->
     case unicode:characters_to_binary(V, utf8, utf8) of
         B when is_binary(B) -> B;
-        _ -> unsupported(V, View, Source)
+        _ -> invalid_utf8(V, View, Source)
     end;
 to_binary(V, View, Source) when is_list(V) ->
     try unicode:characters_to_binary(V) of
         B when is_binary(B) -> B;
-        _ -> unsupported(V, View, Source)
+        %% stopped at a binary that is not UTF-8 (anything else, such as [-1], is not text)
+        {Tag, _, Rest} when Tag =:= error; Tag =:= incomplete ->
+            case Rest of
+                _ when is_binary(Rest) -> invalid_utf8(V, View, Source);
+                [Bin | _] when is_binary(Bin) -> invalid_utf8(V, View, Source);
+                _ -> unsupported(V, View, Source)
+            end
     catch
         error:badarg -> unsupported(V, View, Source)
     end;
@@ -148,6 +156,11 @@ to_binary(V, _, _) when is_integer(V) -> integer_to_binary(V);
 to_binary(V, _, _) when is_float(V) -> float_to_binary(V, [short]);
 to_binary(V, _, _) when is_atom(V) -> atom_to_binary(V, utf8);
 to_binary(V, View, Source) -> unsupported(V, View, Source).
+
+%% Text that is not valid UTF-8 (a binary built from a literal with characters above
+%% Latin-1 is the usual cause: `<<"✓">>' holds the code point modulo 256, not UTF-8).
+invalid_utf8(V, View, Source) ->
+    erlang:error({template_error, {invalid_utf8_value, View, Source, V}}).
 
 unsupported(V, View, Source) ->
     erlang:error({template_error, {unsupported_value, View, Source, V}}).

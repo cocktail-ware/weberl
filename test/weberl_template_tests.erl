@@ -148,13 +148,28 @@ missing_variable_test() ->
 
 %% Atoms render as their name; everything else that is not text or a number is refused.
 unsupported_values_test_() ->
-    Bad = [{a, tuple}, #{a => 1}, [not_chars], [-1], <<255, 254>>, self(), fun() -> ok end],
+    Bad = [{a, tuple}, #{a => 1}, [not_chars], [-1], [$a, -1], self(), fun() -> ok end],
     [fun() ->
              V = tpl(<<"{{ @v }}">>),
              %% the error names the expression, as written
              ?assertEqual({unsupported_value, V, <<"@v">>, Value},
                           render_error(fun() -> weberl_template:render(V, #{v => Value}) end))
      end || Value <- Bad].
+
+%% agentic: `<<"✓">>' in Erlang source is one byte (the code point modulo 256), not UTF-8;
+%% the error said "unsupported" about a value that prints fine.
+invalid_utf8_has_its_own_error_test_() ->
+    Bad = [<<255, 254>>, <<"✓"/utf8, 200>>, [<<255>>], [$a, <<192>>], <<"ab", 226, 156>>],
+    [fun() ->
+             V = tpl(<<"{{ @v }}|{{{ @v }}}">>),
+             ?assertEqual({invalid_utf8_value, V, <<"@v">>, Value},
+                          render_error(fun() -> weberl_template:render(V, #{v => Value}) end))
+     end || Value <- Bad]
+    ++ [fun() ->
+                V = tpl(<<"{{{ @v }}}">>),
+                ?assertEqual({invalid_utf8_value, V, <<"@v">>, <<255>>},
+                             render_error(fun() -> weberl_template:render(V, #{v => <<255>>}) end))
+        end].
 
 unsupported_value_in_raw_test() ->
     V = tpl(<<"{{{ @v }}}">>),

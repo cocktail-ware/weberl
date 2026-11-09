@@ -1052,7 +1052,9 @@ weberl_template:try_render(home_view, Assigns) -> {ok, iodata()} | {error, Reaso
 
 `render/2` raises `error({template_error, Reason})` with `{missing_variable, View,
 Name}`, `{unsupported_value, View, Source, Value}` (`Source` is the expression as written,
-for example `<<"@title">>`), `{not_boolean, View, Line, Value}` and `{case_clause, View, Line, Value}`
+for example `<<"@title">>`), `{invalid_utf8_value, View, Source, Value}` (a binary or string that is not
+UTF-8; usually a binary literal with characters above Latin-1 written without `/utf8`: `<<"✓"/utf8>>`),
+`{not_boolean, View, Line, Value}` and `{case_clause, View, Line, Value}`
 (see [blocks](#conditionals-case-and-loops)), `{invalid_assigns, View, Assigns}` or `{no_template, View}`.
 An expression that raises (a `for` over something that is not a list, a division by zero) propagates as
 the Erlang error. Inside a handler any of these becomes a logged 500. `try_render/2` and
