@@ -1293,9 +1293,25 @@ Templates are compiled **once, when the router starts**, into a generated module
 per view (`home_view__weberl_template`, never a modification of your view).
 Rendering calls that module; nothing is parsed or read again. All templates are
 compiled before any is loaded, so a bad template fails the start without
-replacing anything. To pick up an edited template, restart the router (there is
-no file watching or hot reload). Because templates are read from the source tree,
+replacing anything. To pick up an edited template, a new or removed view or a
+changed route, call `weberl:reload(RouterName)` (below) or restart the router; Weberl
+itself does not watch files. Because templates are read from the source tree,
 the sources must exist when the router starts, as for filesystem routing.
+
+#### Reloading
+
+`weberl:reload(Name)` rebuilds the route table and every template from the files as
+they are now and swaps them into the running router: the same listener and port, open
+connections and live pages stay. It runs the same checks as a start (handlers, limits,
+route conflicts, template compilation, links against the new table); if any fails it
+returns `{error, Reason}` and the old table and templates keep serving. It reads the
+code that is loaded: compile and load changed modules first (a code reloader does that;
+a handler's own code needs no reload step, as it is called by module name), and a view that
+was just added needs its beam loadable. The router and listener records (directories,
+port, static mounts, limits at the router level) are read once at start: changing them is
+a restart. A live page that is already open renders its next update with the new
+template. The adapter does the swap through the optional callback `reload_routes/3`
+(Roadrunner implements it with `roadrunner_listener:reload_routes/2`).
 
 The engine can be used on its own: `compile_file/2`, `compile_source/3`,
 `load/1`, `discover/1` and `associate/2` in `weberl_template`.
@@ -1787,7 +1803,8 @@ See `ROADMAP.md` for the running list. Notable points:
   same router name is started again.
 - No wildcard routes (a parameter is one segment), middleware execution, authentication,
   nested layouts or components in templates, blocks (`if`, `case`, `for`) inside URL and other restricted
-  attribute values or `<script>` and `<style>`, and no hot reloading.
+  attribute values or `<script>` and `<style>`, and no file watching (`weberl:reload/1` is the
+hook for a watcher).
 - Regions are replaced wholesale (no DOM morphing), and their names are static (no
   `item-5` style regions for the rows of a list yet). Nested regions that both use a changed
   variable are both re-rendered.

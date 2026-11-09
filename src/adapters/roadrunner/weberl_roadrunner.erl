@@ -29,7 +29,7 @@
 -module(weberl_roadrunner).
 -behaviour(weberl_adapter).
 
--export([validate_options/1, validate_static/1, start_listener/3,
+-export([validate_options/1, validate_static/1, start_listener/3, reload_routes/3,
          stop_listener/1, port/1, cookies/1, form/1, multipart/1]).
 
 -define(ALLOWED, [max_content_length, request_timeout, tls, protocols]).
@@ -79,6 +79,17 @@ start_listener(Name, Listener, Table) when is_atom(Name) ->
             end;
         {error, _} = Error ->
             Error
+    end.
+
+%% Roadrunner swaps the compiled routes in one step and refuses a table that does not
+%% work, keeping the old one (the listener, its port and its connections stay).
+-spec reload_routes(weberl_adapter:ref(), term(), weberl_table:t()) -> ok | {error, term()}.
+reload_routes(Name, Listener, Table) ->
+    try roadrunner_listener:reload_routes(Name, routes(Listener, Table)) of
+        ok -> ok;
+        {error, Reason} -> {error, {reload_failed, Reason}}
+    catch
+        Class:Reason -> {error, {reload_failed, {Class, Reason}}}
     end.
 
 -spec stop_listener(weberl_adapter:ref()) -> ok | {error, term()}.

@@ -550,6 +550,20 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `{template_error, {bad_generator, View, Line, Source, Value}}` (Source = the qualifiers as written); known side
   effect: the same Erlang error raised by a function the body calls is reported at the `for` too. Agentic should
   rename its widget assign (e.g. `task_state`).
+- **`weberl:reload/1` built (2026-11-09, user asked whether routes can reload).** `weberl_router_server` keeps the
+  validated router and listener records and answers a `reload` call: `build_table/1` (the start pipeline: build,
+  limits audit, handler check, `weberl_views:prepare`) then the adapter's new optional callback
+  `reload_routes(Ref, Listener, Table)` (Roadrunner: `roadrunner_listener:reload_routes/2`, atomic, keeps the
+  listener, the port and open connections), then `persistent_term:put` of the new table and an info log with the
+  added/removed paths. Errors keep the old table; templates are replaced only after all compiled (as at start), so
+  the one window is an adapter refusal after the templates loaded. Router/listener records are not re-read.
+  `weberl_template:load/1` still hard-purges the old template module (a process running it is killed; a quick
+  second reload could in theory hit one mid-render: not seen, noted). Tests: `weberl_reload_tests` (7).
+  **Next, agreed with the user**: a separate library (own repo under cocktail-ware, dev-profile dependency, no
+  dependency on weberl or agentic) to watch directory sets, run a build command, reload beams (checkouts too,
+  purge-safe) and call `{M,F,A}` hooks; agentic's `erl_auto_recompiler` is the prior art (gaps noted: beams under
+  `_build/default/checkouts` are not matched, `load_abs` can fail with `not_purged`, no hooks, no `.weberl`
+  watching). Watcher stays polling in v1, swappable module. Weberl's part is only `weberl:reload/1`.
 - Plan for the feedback (proposal; the user decides order and each design point), continued below:
 
 ### Plan for the feedback (proposal; the user decides order and each design point)

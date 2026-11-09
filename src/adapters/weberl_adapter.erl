@@ -70,4 +70,11 @@
 %% listener configured with `static' mounts.
 -callback validate_static([{string(), term(), map()}]) -> ok | {error, term()}.
 
--optional_callbacks([validate_static/1]).
+%% Optional: replace the route table of a running listener without restarting it
+%% (`weberl:reload/1'). Receives the listener's reference, the same validated
+%% listener record as `start_listener/3' and the new table. It must be atomic: on
+%% `{error, _}' the listener keeps serving the table it had, and connections that are
+%% open stay open. An adapter that does not export this makes `weberl:reload/1'
+%% answer `{error, {reload_unsupported, Adapter}}'.
+-callback reload_routes(ref(), Listener :: term(), weberl_table:t()) -> ok | {error, term()}.
+-optional_callbacks([validate_static/1, reload_routes/3]).
