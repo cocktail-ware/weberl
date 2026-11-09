@@ -565,7 +565,7 @@ on Weberl. Layouts and slots worked well. Six frictions, in the author's words a
   `_build/default/checkouts` are not matched, `load_abs` can fail with `not_purged`, no hooks, no `.weberl`
   watching). Watcher stays polling in v1, swappable module. Weberl's part is only `weberl:reload/1`.
 - **`erl_file_reloader` built and used (2026-11-09).** Local clone `~/code/erl_file_reloader`, GitHub repo
-  `cocktail-ware/erl_file_loader` (the repo name differs from the app name; decisions in its `DESIGN.md`,
+  `cocktail-ware/erl_file_reloader` (decisions in its `DESIGN.md`,
   usage in its `README.md`, 76 tests). Named watches in one `gen_statem`, polling with a content hash for
   recent files, a build port with timeout (kills the process group), `code:atomic_load` with configurable
   `soft`/`hard` purge, `{M,F,A}` hooks run in monitored processes with the summary appended (falling back to

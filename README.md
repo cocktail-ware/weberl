@@ -1316,7 +1316,7 @@ template. The adapter does the swap through the optional callback `reload_routes
 
 ##### Reloading on file changes (development)
 
-[`erl_file_reloader`](https://github.com/cocktail-ware/erl_file_loader) watches files, runs a
+[`erl_file_reloader`](https://github.com/cocktail-ware/erl_file_reloader) watches files, runs a
 build, reloads the changed beams and calls hooks. Weberl lists it in its `deps` (it does not use
 it, and it is not in Weberl's `applications`), so an application that depends on Weberl has it;
 start it in your dev profile with the hook `{weberl, reload, [Name]}`:
